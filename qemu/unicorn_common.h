@@ -136,7 +136,7 @@ static inline void uc_common_init(struct uc_struct* uc)
     uc->target_page = target_page_init;
     uc->softfloat_initialize = softfloat_init;
     uc->tcg_flush_tlb = tcg_flush_softmmu_tlb;
-    uc->memory_map_io = memory_map_io;
+    uc->memory_map_io = (uc_memory_map_io_t)memory_map_io;
     uc->set_tlb = uc_set_tlb;
     uc->memory_mapping = find_memory_mapping;
     uc->memory_filter_subregions = memory_region_filter_subregions;
