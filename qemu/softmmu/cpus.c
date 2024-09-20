@@ -187,8 +187,9 @@ static inline gboolean uc_exit_invalidate_iter(gpointer key, gpointer val, gpoin
 {
     uint64_t exit = *((uint64_t*)key);
     uc_engine *uc = (uc_engine*)data;
-    
-    if (exit != 0) {
+
+    // HYUNMIN: Add additional condition for exit != -1 due to ASAN error
+    if ((exit != 0) && (exit != -1)) {
         // Unicorn: Why addr - 1?
         // 
         // 0: INC ecx
