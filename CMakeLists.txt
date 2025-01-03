@@ -343,10 +343,16 @@ else()
         ${TARGET_LIST}
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
+    # Do not regenerate config if unchanged
+    file(READ ${CMAKE_BINARY_DIR}/config-host.h PREVIOUS_CONFIG)
     execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
         INPUT_FILE ${CMAKE_BINARY_DIR}/config-host.mak
-        OUTPUT_FILE ${CMAKE_BINARY_DIR}/config-host.h
+        OUTPUT_VARIABLE CURRENT_CONFIG
     )
+    if(NOT PREVIOUS_CONFIG STREQUAL CURRENT_CONFIG)
+        message("Overwriting ${CMAKE_BINARY_DIR}/config-host.h")
+        file(WRITE ${CMAKE_BINARY_DIR}/config-host.h ${CURRENT_CONFIG})
+    endif()
     if(UNICORN_HAS_X86)
         execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
             INPUT_FILE ${CMAKE_BINARY_DIR}/x86_64-softmmu/config-target.mak
@@ -360,10 +366,16 @@ else()
         )
     endif()
     if(UNICORN_HAS_AARCH64)
+        # Do not regenerate config if unchanged
+        file(READ ${CMAKE_BINARY_DIR}/aarch64-softmmu/config-target.h PREVIOUS_CONFIG)
         execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
             INPUT_FILE ${CMAKE_BINARY_DIR}/aarch64-softmmu/config-target.mak
-            OUTPUT_FILE ${CMAKE_BINARY_DIR}/aarch64-softmmu/config-target.h
+            OUTPUT_VARIABLE CURRENT_CONFIG
         )
+        if(NOT PREVIOUS_CONFIG STREQUAL CURRENT_CONFIG)
+            message("Overwriting ${CMAKE_BINARY_DIR}/aarch64-softmmu/config-target.h")
+            file(WRITE ${CMAKE_BINARY_DIR}/aarch64-softmmu/config-target.h ${CURRENT_CONFIG})
+        endif()
     endif()
     if(UNICORN_HAS_M68K)
         execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
