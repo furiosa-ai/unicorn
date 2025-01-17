@@ -337,12 +337,27 @@ else()
     set(TARGET_LIST "${TARGET_LIST} ")
 
     # GEN config-host.mak & target directories
-    execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
-        --cc=${CMAKE_C_COMPILER}
-        ${EXTRA_CFLAGS}
-        ${TARGET_LIST}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    if(NOT EXISTS "${CMAKE_BINARY_DIR}/config-host.mak")
+        execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
+            --cc=${CMAKE_C_COMPILER}
+            ${EXTRA_CFLAGS}
+            ${TARGET_LIST}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    else()
+        file(TIMESTAMP ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure CONFIGURE_TIMESTAMP %s)
+        file(TIMESTAMP ${CMAKE_BINARY_DIR}/config-host.mak CONFIG_MAK_TIMESTAMP %s)
+        # Only run configure when configure has changed after config-host.mak generation
+        if(CONFIG_MAK_TIMESTAMP LESS CONFIGURE_TIMESTAMP)
+            message("Overwriting ${CMAKE_BINARY_DIR}/config-host.mak")
+            execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
+                --cc=${CMAKE_C_COMPILER}
+                ${EXTRA_CFLAGS}
+                ${TARGET_LIST}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            )
+        endif()
+    endif()
     # Do not regenerate config if unchanged
     if(NOT EXISTS "${CMAKE_BINARY_DIR}/config-host.h")
         execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
