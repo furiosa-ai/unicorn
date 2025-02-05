@@ -1,16 +1,17 @@
-# Intel architecture classes and structures.
-#
+"""Intel architecture classes and structures.
+"""
 # @author elicn
 
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Tuple, Type
 
 import ctypes
 
-from .. import Uc, UcError
-from .. import x86_const as const
-
-from unicorn.unicorn_py3 import uccallback
+# traditional unicorn imports
+from unicorn import x86_const as const
 from unicorn.unicorn_const import UC_ERR_ARG, UC_HOOK_INSN
+
+# newly introduced unicorn imports
+from ..unicorn import Uc, UcError, uccallback
 from .types import uc_engine, UcTupledReg, UcReg128, UcReg256, UcReg512
 
 X86MMRReg = Tuple[int, int, int, int]
@@ -36,6 +37,9 @@ class UcRegMMR(UcTupledReg[X86MMRReg]):
 
 
 class UcRegMSR(UcTupledReg[X86MSRReg]):
+    """Intel Model Specific Register
+    """
+
     _fields_ = (
         ('rid', ctypes.c_uint32),
         ('val', ctypes.c_uint64)
@@ -47,6 +51,9 @@ class UcRegMSR(UcTupledReg[X86MSRReg]):
 
 
 class UcRegFPR(UcTupledReg[X86FPReg]):
+    """Intel Floating Point Register
+    """
+
     _fields_ = (
         ('mantissa', ctypes.c_uint64),
         ('exponent', ctypes.c_uint16)
@@ -56,6 +63,8 @@ class UcRegFPR(UcTupledReg[X86FPReg]):
 class UcIntel(Uc):
     """Unicorn subclass for Intel architecture.
     """
+
+    REG_RANGE_MSR = (const.UC_X86_REG_MSR,)
 
     REG_RANGE_MMR = (
         const.UC_X86_REG_IDTR,
@@ -76,30 +85,30 @@ class UcIntel(Uc):
         insn = ctypes.c_int(aux1)
 
         def __hook_insn_in():
-            @uccallback(HOOK_INSN_IN_CFUNC)
-            def __hook_insn_in_cb(handle: int, port: int, size: int, key: int) -> int:
-                return callback(self, port, size, user_data)
+            @uccallback(self, HOOK_INSN_IN_CFUNC)
+            def __hook_insn_in_cb(uc: Uc, port: int, size: int, key: int) -> int:
+                return callback(uc, port, size, user_data)
 
             return __hook_insn_in_cb
 
         def __hook_insn_out():
-            @uccallback(HOOK_INSN_OUT_CFUNC)
-            def __hook_insn_out_cb(handle: int, port: int, size: int, value: int, key: int):
-                callback(self, port, size, value, user_data)
+            @uccallback(self, HOOK_INSN_OUT_CFUNC)
+            def __hook_insn_out_cb(uc: Uc, port: int, size: int, value: int, key: int):
+                callback(uc, port, size, value, user_data)
 
             return __hook_insn_out_cb
 
         def __hook_insn_syscall():
-            @uccallback(HOOK_INSN_SYSCALL_CFUNC)
-            def __hook_insn_syscall_cb(handle: int, key: int):
-                callback(self, user_data)
+            @uccallback(self, HOOK_INSN_SYSCALL_CFUNC)
+            def __hook_insn_syscall_cb(uc: Uc, key: int):
+                callback(uc, user_data)
 
             return __hook_insn_syscall_cb
 
         def __hook_insn_cpuid():
-            @uccallback(HOOK_INSN_CPUID_CFUNC)
-            def __hook_insn_cpuid_cb(handle: int, key: int) -> int:
-                return callback(self, user_data)
+            @uccallback(self, HOOK_INSN_CPUID_CFUNC)
+            def __hook_insn_cpuid_cb(uc: Uc, key: int) -> int:
+                return callback(uc, user_data)
 
             return __hook_insn_cpuid_cb
 
@@ -120,12 +129,13 @@ class UcIntel(Uc):
 
         return getattr(self, '_Uc__do_hook_add')(htype, fptr, begin, end, insn)
 
-    @staticmethod
-    def __select_reg_class(reg_id: int):
-        """Select class for special architectural registers.
+    @classmethod
+    def _select_reg_class(cls, reg_id: int) -> Type:
+        """Select the appropriate class for the specified architectural register.
         """
 
         reg_class = (
+            (UcIntel.REG_RANGE_MSR, UcRegMSR),
             (UcIntel.REG_RANGE_MMR, UcRegMMR),
             (UcIntel.REG_RANGE_FP,  UcRegFPR),
             (UcIntel.REG_RANGE_XMM, UcReg128),
@@ -133,46 +143,28 @@ class UcIntel(Uc):
             (UcIntel.REG_RANGE_ZMM, UcReg512)
         )
 
-        return next((cls for rng, cls in reg_class if reg_id in rng), None)
-
-    def reg_read(self, reg_id: int, aux: Any = None):
-        # select register class for special cases
-        reg_cls = UcIntel.__select_reg_class(reg_id)
-
-        if reg_cls is None:
-            # backward compatibility: msr read through reg_read
-            if reg_id == const.UC_X86_REG_MSR:
-                if type(aux) is not int:
-                    raise UcError(UC_ERR_ARG)
-
-                value = self.msr_read(aux)
-
-            else:
-                value = super().reg_read(reg_id, aux)
-        else:
-            value = self._reg_read(reg_id, reg_cls)
-
-        return value
-
-    def reg_write(self, reg_id: int, value) -> None:
-        # select register class for special cases
-        reg_cls = UcIntel.__select_reg_class(reg_id)
-
-        if reg_cls is None:
-            # backward compatibility: msr write through reg_write
-            if reg_id == const.UC_X86_REG_MSR:
-                if type(value) is not tuple or len(value) != 2:
-                    raise UcError(UC_ERR_ARG)
-
-                self.msr_write(*value)
-                return
-
-            super().reg_write(reg_id, value)
-        else:
-            self._reg_write(reg_id, reg_cls, value)
+        return next((c for rng, c in reg_class if reg_id in rng), cls._DEFAULT_REGTYPE)
 
     def msr_read(self, msr_id: int) -> int:
-        return self._reg_read(const.UC_X86_REG_MSR, UcRegMSR, msr_id)
+        """Read a model-specific register.
+
+        Args:
+            msr_id: MSR index
+
+        Returns: MSR value
+        """
+
+        return self.reg_read(const.UC_X86_REG_MSR, msr_id)
 
     def msr_write(self, msr_id: int, value: int) -> None:
-        self._reg_write(const.UC_X86_REG_MSR, UcRegMSR, (msr_id, value))
+        """Write to a model-specific register.
+
+        Args:
+            msr_id: MSR index
+            value: new MSR value
+        """
+
+        self.reg_write(const.UC_X86_REG_MSR, (msr_id, value))
+
+
+__all__ = ['UcRegMMR', 'UcRegMSR', 'UcRegFPR', 'UcIntel']

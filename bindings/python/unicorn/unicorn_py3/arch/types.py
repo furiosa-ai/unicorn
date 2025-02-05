@@ -1,9 +1,9 @@
-# Common types and structures.
-#
+"""Common types and structures.
+"""
 # @author elicn
 
 from abc import abstractmethod
-from typing import Generic, Tuple, TypeVar
+from typing import Any, Generic, Tuple, TypeVar
 
 import ctypes
 
@@ -15,9 +15,6 @@ uc_hook_h  = ctypes.c_size_t
 
 VT = TypeVar('VT', bound=Tuple[int, ...])
 
-def _structure_repr(self):
-    return "%s(%s)" % (self.__class__.__name__, ", ".join("%s=%s" % (k, getattr(self, k)) for (k, _) in self._fields_))
-
 
 class UcReg(ctypes.Structure):
     """A base class for composite registers.
@@ -27,7 +24,7 @@ class UcReg(ctypes.Structure):
 
     @property
     @abstractmethod
-    def value(self):
+    def value(self) -> Any:
         """Get register value.
         """
 
@@ -35,13 +32,12 @@ class UcReg(ctypes.Structure):
 
     @classmethod
     @abstractmethod
-    def from_value(cls, value):
+    def from_value(cls, value) -> 'UcReg':
         """Create a register instance from a given value.
         """
 
         pass
 
-    _repr_ = _structure_repr
 
 class UcTupledReg(UcReg, Generic[VT]):
     """A base class for registers whose values are represented as a set
@@ -56,7 +52,11 @@ class UcTupledReg(UcReg, Generic[VT]):
 
     @classmethod
     def from_value(cls, value: VT):
-        assert type(value) is tuple and len(value) == len(cls._fields_)
+        if not isinstance(value, tuple):
+            raise TypeError(f'got {type(value).__name__} while expecting a tuple')
+
+        if len(value) != len(cls._fields_):
+            raise TypeError(f'got {len(value)} elements while expecting {len(cls._fields_)}')
 
         return cls(*value)
 
@@ -76,7 +76,8 @@ class UcLargeReg(UcReg):
 
     @classmethod
     def from_value(cls, value: int):
-        assert type(value) is int
+        if not isinstance(value, int):
+            raise TypeError(f'got {type(value).__name__} while expecting an integer')
 
         mask = (1 << 64) - 1
         size = cls._fields_[0][1]._length_
@@ -85,12 +86,24 @@ class UcLargeReg(UcReg):
 
 
 class UcReg128(UcLargeReg):
+    """Large register holding a 128-bit value.
+    """
+
     _fields_ = [('qwords', ctypes.c_uint64 * 2)]
 
 
 class UcReg256(UcLargeReg):
+    """Large register holding a 256-bit value.
+    """
+
     _fields_ = [('qwords', ctypes.c_uint64 * 4)]
 
 
 class UcReg512(UcLargeReg):
+    """Large register holding a 512-bit value.
+    """
+
     _fields_ = [('qwords', ctypes.c_uint64 * 8)]
+
+
+__all__ = ['uc_err', 'uc_engine', 'uc_context', 'uc_hook_h', 'UcReg', 'UcTupledReg', 'UcLargeReg', 'UcReg128', 'UcReg256', 'UcReg512']

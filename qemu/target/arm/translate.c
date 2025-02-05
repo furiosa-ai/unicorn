@@ -11763,6 +11763,12 @@ static void arm_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
     }
 }
 
+static void arm_pc_sync(DisasContextBase *db, CPUState *state)
+{
+    DisasContext *dc = container_of(db, DisasContext, base);
+    gen_set_pc_im(dc, dc->base.pc_next);
+}
+
 static const TranslatorOps arm_translator_ops = {
     .init_disas_context = arm_tr_init_disas_context,
     .tb_start           = arm_tr_tb_start,
@@ -11770,6 +11776,7 @@ static const TranslatorOps arm_translator_ops = {
     .breakpoint_check   = arm_tr_breakpoint_check,
     .translate_insn     = arm_tr_translate_insn,
     .tb_stop            = arm_tr_tb_stop,
+    .pc_sync            = arm_pc_sync
 };
 
 static const TranslatorOps thumb_translator_ops = {
@@ -11779,6 +11786,7 @@ static const TranslatorOps thumb_translator_ops = {
     .breakpoint_check   = arm_tr_breakpoint_check,
     .translate_insn     = thumb_tr_translate_insn,
     .tb_stop            = arm_tr_tb_stop,
+    .pc_sync            = arm_pc_sync
 };
 
 /* generate intermediate code for basic block 'tb'.  */
