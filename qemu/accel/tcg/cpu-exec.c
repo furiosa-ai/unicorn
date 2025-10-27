@@ -414,6 +414,15 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
         }
         // Unicorn: If un-catched interrupt, stop executions.
         if (!catched) {
+            // EXCP_SMC
+            // printf(">> EXCP interrupt_request : %d\n", cpu->interrupt_request);
+            // *ret = cpu->exception_index;
+            // cpu->exception_index = -1;
+            // return true;
+            CPUClass *cc = CPU_GET_CLASS(cpu);
+            cc->do_interrupt(cpu);
+            cpu->exception_index = -1;
+            /*
             // printf("AAAAAAAAAAAA\n"); qq
             if (uc->invalid_error == UC_ERR_OK) {
                 uc->invalid_error = UC_ERR_EXCEPTION;
@@ -421,6 +430,7 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
             cpu->halted = 1;
             *ret = EXCP_HLT;
             return true;
+            */
         }
 
         cpu->exception_index = -1;

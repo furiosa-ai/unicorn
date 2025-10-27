@@ -52,10 +52,8 @@ struct TranslationBlock;
 
 // Place the struct here since we need it in uc.c
 typedef struct _mmio_cbs {
-    uc_cb_mmio_read_t read;
-    void *user_data_read;
-    uc_cb_mmio_write_t write;
-    void *user_data_write;
+    uc_cb_mmio_t callback;
+    void *user_data;
     MemoryRegionOps ops;
 } mmio_cbs;
 
@@ -123,10 +121,8 @@ typedef int (*uc_cpus_init)(struct uc_struct *, const char *);
 
 typedef MemoryRegion *(*uc_memory_map_io_t)(struct uc_struct *uc,
                                             ram_addr_t begin, size_t size,
-                                            uc_cb_mmio_read_t read_cb,
-                                            uc_cb_mmio_write_t write_cb,
-                                            void *user_data_read,
-                                            void *user_data_write);
+                                            uc_cb_mmio_t callback,
+                                            void *user_data);
 
 // which interrupt should make emulation stop?
 typedef bool (*uc_args_int_t)(struct uc_struct *uc, int intno);
@@ -188,6 +184,24 @@ typedef uc_err (*uc_context_save_t)(struct uc_struct *uc, uc_context *context);
 // Restore a CPU context
 typedef uc_err (*uc_context_restore_t)(struct uc_struct *uc,
                                        uc_context *context);
+
+// from ocx-qemu-arm
+typedef void (*tlb_flush_t)(CPUState*);
+typedef void (*tlb_flush_page_t)(CPUState*, uint64_t);
+typedef void (*tlb_flush_mmuidx_t)(CPUState*, uint16_t);
+typedef void (*tlb_flush_page_mmuidx_t)(CPUState*, uint64_t, uint16_t);
+
+typedef void (*tlb_cluster_flush_t)(CPUState*);
+typedef void (*tlb_cluster_flush_page_t)(CPUState*, uint64_t);
+typedef void (*tlb_cluster_flush_mmuidx_t)(CPUState*, uint16_t);
+typedef void (*tlb_cluster_flush_page_mmuidx_t)(CPUState*, uint64_t, uint16_t);
+
+typedef int  (*cpu_insert_breakpoint_t)(CPUState*, vaddr, int, CPUBreakpoint**);
+typedef int  (*cpu_remove_breakpoint_t)(CPUState*, vaddr, int);
+typedef int  (*cpu_insert_watchpoint_t)(CPUState*, vaddr, vaddr, int, CPUWatchpoint**);
+typedef int  (*cpu_remove_watchpoint_t)(CPUState*, vaddr, vaddr, int);
+
+typedef void (*uc_timer_recalc_t)(CPUState*, int);
 
 // hook list offsets
 //
@@ -317,6 +331,58 @@ struct uc_struct {
     uc_context_size_t context_size;
     uc_context_save_t context_save;
     uc_context_restore_t context_restore;
+
+    // from ocx-qemu-arm
+    tlb_flush_t             tlb_flush;
+    tlb_flush_page_t        tlb_flush_page;
+    tlb_flush_mmuidx_t      tlb_flush_mmuidx;
+    tlb_flush_page_mmuidx_t tlb_flush_page_mmuidx;
+
+    tlb_cluster_flush_t             tlb_cluster_flush;
+    tlb_cluster_flush_page_t        tlb_cluster_flush_page;
+    tlb_cluster_flush_mmuidx_t      tlb_cluster_flush_mmuidx;
+    tlb_cluster_flush_page_mmuidx_t tlb_cluster_flush_page_mmuidx;
+
+    uc_tlb_cluster_flush_t             uc_tlb_cluster_flush;
+    uc_tlb_cluster_flush_page_t        uc_tlb_cluster_flush_page;
+    uc_tlb_cluster_flush_mmuidx_t      uc_tlb_cluster_flush_mmuidx;
+    uc_tlb_cluster_flush_page_mmuidx_t uc_tlb_cluster_flush_page_mmuidx;
+    void*                              uc_tlb_cluster_opaque;
+
+    // to debug
+    cpu_insert_breakpoint_t insert_breakpoint;
+    cpu_remove_breakpoint_t remove_breakpoint;
+    cpu_insert_watchpoint_t insert_watchpoint;
+    cpu_remove_watchpoint_t remove_watchpoint;
+
+    uc_cb_mmio_t uc_portio_func;
+    void*        uc_portio_opaque;
+
+    uc_breakpoint_hit_t uc_breakpoint_func;
+    void*               uc_breakpoint_opaque;
+
+    uc_watchpoint_hit_t uc_watchpoint_func;
+    void*               uc_watchpoint_opaque;
+
+    uc_hintfunc_t uc_hint_func;
+    void*         uc_hint_opaque;
+
+    uc_cache_func_t uc_cache_func;
+    void*           uc_cache_opaque;
+
+    // from ocx-qemu-arm
+    uc_timer_timefunc_t timer_timefunc;
+    uc_timer_irqfunc_t  timer_irqfunc;
+    uc_timer_schedule_t timer_schedule;
+    uc_timer_recalc_t   timer_recalc;
+    void*               timer_opaque;
+    bool                timer_initialized;
+
+    // bool is_debug;
+    int smp;
+    int core_id;
+    // TODO interface for updating event_register
+    bool event_register;
 
     /*  only 1 cpu in unicorn,
         do not need current_cpu to handle current running cpu. */

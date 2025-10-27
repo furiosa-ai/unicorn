@@ -350,6 +350,10 @@ typedef arg_empty arg_WFE;
 static bool trans_WFE(DisasContext *ctx, arg_WFE *a);
 typedef arg_empty arg_WFI;
 static bool trans_WFI(DisasContext *ctx, arg_WFI *a);
+typedef arg_empty arg_SEV;
+static bool trans_SEV(DisasContext *ctx, arg_SEV *a);
+typedef arg_empty arg_SEVL;
+static bool trans_SEVL(DisasContext *ctx, arg_SEVL *a);
 typedef arg_empty arg_NOP;
 static bool trans_NOP(DisasContext *ctx, arg_NOP *a);
 typedef arg_msr_i arg_MSR_imm;
@@ -2467,6 +2471,18 @@ static bool disas_a32(DisasContext *ctx, uint32_t insn)
                         /* /mnt/c/Users/me/Documents/projects/unicorn2/tmp/tmp/qemu-5.0.0/target/arm/a32.decode:190 */
                         disas_a32_extract_disas_a32_Fmt_16(ctx, &u.f_empty, insn);
                         if (trans_WFI(ctx, &u.f_empty)) return true;
+                    }
+                    if ((insn & 0x000000ff) == 0x00000004) {
+                        /* ....0011 00100000 1111.... 00000100 */
+                        /* /root/workspaces/qemu_release/qemu-5.0.0-rc4/target/arm/a32.decode:193 */
+                        disas_a32_extract_disas_a32_Fmt_16(ctx, &u.f_empty, insn);
+                        if (trans_SEV(ctx, &u.f_empty)) return true;
+                    }
+                    if ((insn & 0x000000ff) == 0x00000005) {
+                        /* ....0011 00100000 1111.... 00000101 */
+                        /* /root/workspaces/qemu_release/qemu-5.0.0-rc4/target/arm/a32.decode:194 */
+                        disas_a32_extract_disas_a32_Fmt_16(ctx, &u.f_empty, insn);
+                        if (trans_SEVL(ctx, &u.f_empty)) return true;
                     }
                     /* /mnt/c/Users/me/Documents/projects/unicorn2/tmp/tmp/qemu-5.0.0/target/arm/a32.decode:198 */
                     disas_a32_extract_disas_a32_Fmt_16(ctx, &u.f_empty, insn);

@@ -50,6 +50,8 @@ typedef enum DisasJumpType {
     DISAS_TARGET_9,
     DISAS_TARGET_10,
     DISAS_TARGET_11,
+    DISAS_TARGET_12,
+    DISAS_TARGET_13,
 } DisasJumpType;
 
 /**

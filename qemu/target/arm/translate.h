@@ -157,6 +157,8 @@ static inline void disas_set_insn_syndrome(DisasContext *s, uint32_t syn)
 #define DISAS_HVC       DISAS_TARGET_5
 #define DISAS_SMC       DISAS_TARGET_6
 #define DISAS_YIELD     DISAS_TARGET_7
+#define DISAS_SEV       DISAS_TARGET_12
+#define DISAS_SEVL      DISAS_TARGET_13
 /* M profile branch which might be an exception return (and so needs
  * custom end-of-TB code)
  */

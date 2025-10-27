@@ -1822,6 +1822,8 @@
 #define helper_wfi helper_wfi_aarch64
 #define helper_wfe helper_wfe_aarch64
 #define helper_yield helper_yield_aarch64
+#define helper_sev helper_sev_aarch64
+#define helper_sevl helper_sevl_aarch64
 #define helper_exception_internal helper_exception_internal_aarch64
 #define helper_exception_with_syndrome helper_exception_with_syndrome_aarch64
 #define helper_exception_bkpt_insn helper_exception_bkpt_insn_aarch64

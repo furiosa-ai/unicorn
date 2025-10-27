@@ -32,8 +32,8 @@ typedef struct MemoryRegionOps MemoryRegionOps;
 
 typedef struct IOMMUTLBEntry IOMMUTLBEntry;
 
-typedef uint64_t (*uc_cb_mmio_read_t)(struct uc_struct *uc, uint64_t addr, unsigned size, void *user_data);
-typedef void (*uc_cb_mmio_write_t)(struct uc_struct *uc, uint64_t addr, unsigned size, uint64_t data, void *user_data);
+// typedef uint64_t (*uc_cb_mmio_read_t)(struct uc_struct *uc, uint64_t addr, unsigned size, void *user_data);
+// typedef void (*uc_cb_mmio_write_t)(struct uc_struct *uc, uint64_t addr, unsigned size, uint64_t data, void *user_data);
 
 /* See address_space_translate: bit 0 is read, bit 1 is write.  */
 typedef enum {
@@ -1213,8 +1213,7 @@ static inline MemOp devend_memop(enum device_endian end)
 
 MemoryRegion *memory_map(struct uc_struct *uc, hwaddr begin, size_t size, uint32_t perms);
 MemoryRegion *memory_map_ptr(struct uc_struct *uc, hwaddr begin, size_t size, uint32_t perms, void *ptr);
- MemoryRegion *memory_map_io(struct uc_struct *uc, ram_addr_t begin, size_t size, uc_cb_mmio_read_t read_cb,
-                             uc_cb_mmio_write_t write_cb, void *user_data_read, void *user_data_write);
+MemoryRegion *memory_map_io(struct uc_struct *uc, ram_addr_t begin, size_t size, void *callback, void *user_data);
 MemoryRegion *memory_cow(struct uc_struct *uc, MemoryRegion *parrent, hwaddr begin, size_t size);
 void memory_unmap(struct uc_struct *uc, MemoryRegion *mr);
 void memory_moveout(struct uc_struct *uc, MemoryRegion *mr);

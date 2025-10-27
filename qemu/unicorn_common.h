@@ -203,12 +203,23 @@ static inline void uc_common_init(struct uc_struct* uc)
     uc->target_page = target_page_init;
     uc->softfloat_initialize = softfloat_init;
     uc->tcg_flush_tlb = tcg_flush_softmmu_tlb;
-    uc->memory_map_io = memory_map_io;
+    uc->memory_map_io = (uc_memory_map_io_t)memory_map_io;
     uc->set_tlb = uc_set_tlb;
     uc->memory_mapping = find_memory_mapping;
     uc->memory_filter_subregions = memory_region_filter_subregions;
     uc->flatview_copy = flatview_copy;
     uc->memory_cow = memory_cow;
+
+    // from ocx-qemu-arm
+    uc->tlb_flush = tlb_flush;
+    uc->tlb_flush_page = tlb_flush_page;
+    uc->tlb_flush_mmuidx = tlb_flush_by_mmuidx;
+    uc->tlb_flush_page_mmuidx = tlb_flush_page_by_mmuidx;
+    // to debug
+    uc->insert_breakpoint = cpu_breakpoint_insert;
+    uc->remove_breakpoint = cpu_breakpoint_remove;
+    uc->insert_watchpoint = cpu_watchpoint_insert;
+    // TODO uc->remove_watchpoint = cpu_watchpoint_remove;
 
     if (!uc->release)
         uc->release = release_common;

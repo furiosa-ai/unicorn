@@ -482,6 +482,13 @@ static void tlbimva_hyp_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
                                              ARMMMUIdxBit_E2);
 }
 
+// from ocx-qemu-arm unicorn
+static void icache_flush_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                               uint64_t value) {
+    // icache_debug("[%08lx] flush icache\n", (unsigned long)env->pc);
+    tb_flush(env_cpu(env));
+}
+
 static const ARMCPRegInfo cp_reginfo[] = {
     /* Define the secure and non-secure FCSE identifier CP registers
      * separately because there is no secure bank in V8 (no _EL3).  This allows
@@ -545,6 +552,11 @@ static const ARMCPRegInfo not_v8_cp_reginfo[] = {
     { .name = "CACHEMAINT", .cp = 15, .crn = 7, .crm = CP_ANY,
       .opc1 = 0, .opc2 = CP_ANY, .access = PL1_W,
       .type = ARM_CP_NOP | ARM_CP_OVERRIDE },
+    // from ocx-qemu-arm unicorn : intercept icache flushes to flush tlb
+    // TODO { .name = "ICACHE_FLUSH", .cp = 15, .crn = 7, .crm = 5,
+    // TODO   .opc1 = 0, .opc2 = 0, .access = PL1_W, .writefn = icache_flush_write,
+    // TODO   .type = ARM_CP_IO | ARM_CP_NO_RAW,
+    // TODO },
     REGINFO_SENTINEL
 };
 
@@ -1619,20 +1631,72 @@ static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void scr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
     /* Begin with base v8.0 state.  */
-    uint32_t valid_mask = 0x3fff;
+    uint64_t valid_mask = 0x3fff;
     ARMCPU *cpu = env_archcpu(env);
+    uint64_t changed;
 
+    /*
+     * Because SCR_EL3 is the "real" cpreg and SCR is the alias, reset always
+     * passes the reginfo for SCR_EL3, which has type ARM_CP_STATE_AA64.
+     * Instead, choose the format based on the mode of EL3.
+     */
     if (arm_el_is_aa64(env, 3)) {
-        value |= SCR_FW | SCR_AW;   /* these two bits are RES1.  */
-        valid_mask &= ~SCR_NET;
+        value |= SCR_FW | SCR_AW;      /* RES1 */
+        valid_mask &= ~SCR_NET;        /* RES0 */
+
+        if (!cpu_isar_feature(aa64_aa32_el1, cpu) &&
+            !cpu_isar_feature(aa64_aa32_el2, cpu)) {
+            value |= SCR_RW;           /* RAO/WI */
+        }
+        // to pass tbm
+        // if (cpu_isar_feature(aa64_ras, cpu)) {
+        //     valid_mask |= SCR_TERR;
+        // }
+        // if (cpu_isar_feature(aa64_lor, cpu)) {
+        //     valid_mask |= SCR_TLOR;
+        // }
+        if (cpu_isar_feature(aa64_pauth, cpu)) {
+            valid_mask |= SCR_API | SCR_APK;
+        }
+        if (cpu_isar_feature(aa64_sel2, cpu)) {
+            valid_mask |= SCR_EEL2;
+        } else if (cpu_isar_feature(aa64_rme, cpu)) {
+            /* With RME and without SEL2, NS is RES1 (R_GSWWH, I_DJJQJ). */
+            value |= SCR_NS;
+        }
+        if (cpu_isar_feature(aa64_mte, cpu)) {
+            valid_mask |= SCR_ATA;
+        }
+        if (cpu_isar_feature(aa64_scxtnum, cpu)) {
+            valid_mask |= SCR_ENSCXT;
+        }
+        if (cpu_isar_feature(aa64_doublefault, cpu)) {
+            valid_mask |= SCR_EASE | SCR_NMEA;
+        }
+        if (cpu_isar_feature(aa64_sme, cpu)) {
+            valid_mask |= SCR_ENTP2;
+        }
+        if (cpu_isar_feature(aa64_hcx, cpu)) {
+            valid_mask |= SCR_HXEN;
+        }
+        if (cpu_isar_feature(aa64_fgt, cpu)) {
+            valid_mask |= SCR_FGTEN;
+        }
+        if (cpu_isar_feature(aa64_rme, cpu)) {
+            valid_mask |= SCR_NSE | SCR_GPF;
+        }
     } else {
         valid_mask &= ~(SCR_RW | SCR_ST);
+        if (cpu_isar_feature(aa32_ras, cpu)) {
+            valid_mask |= SCR_TERR;
+        }
     }
 
     if (!arm_feature(env, ARM_FEATURE_EL2)) {
         valid_mask &= ~SCR_HCE;
 
-        /* On ARMv7, SMD (or SCD as it is called in v7) is only
+        /*
+         * On ARMv7, SMD (or SCD as it is called in v7) is only
          * supported if EL2 exists. The bit is UNK/SBZP when
          * EL2 is unavailable. In QEMU ARMv7, we force it to always zero
          * when EL2 is unavailable.
@@ -1643,16 +1707,33 @@ static void scr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
             valid_mask &= ~SCR_SMD;
         }
     }
-    if (cpu_isar_feature(aa64_lor, cpu)) {
-        valid_mask |= SCR_TLOR;
-    }
-    if (cpu_isar_feature(aa64_pauth, cpu)) {
-        valid_mask |= SCR_API | SCR_APK;
-    }
 
     /* Clear all-context RES0 bits.  */
     value &= valid_mask;
-    raw_write(env, ri, value);
+    changed = env->cp15.scr_el3 ^ value;
+    env->cp15.scr_el3 = value;
+
+    /*
+     * If SCR_EL3.{NS,NSE} changes, i.e. change of security state,
+     * we must invalidate all TLBs below EL3.
+     */
+    if (changed & (SCR_NS | SCR_NSE)) {
+        tlb_flush_by_mmuidx(env_cpu(env), (ARMMMUIdxBit_E10_0 |
+                                           ARMMMUIdxBit_E20_0 |
+                                           ARMMMUIdxBit_E10_1 |
+                                           ARMMMUIdxBit_E20_2 |
+                                           ARMMMUIdxBit_E10_1_PAN |
+                                           ARMMMUIdxBit_E20_2_PAN |
+                                           ARMMMUIdxBit_E2));
+    }
+}
+static void scr_reset(CPUARMState *env, const ARMCPRegInfo *ri)
+{
+    /*
+     * scr_write will set the RES1 bits on an AArch64-only CPU.
+     * The reset value will be 0x30 on an AArch64-only CPU and 0 otherwise.
+     */
+    scr_write(env, ri, 0);
 }
 
 static CPAccessResult access_aa64_tid2(CPUARMState *env,
@@ -2272,14 +2353,30 @@ static CPAccessResult gt_stimer_access(CPUARMState *env,
 static uint64_t gt_get_countervalue(CPUARMState *env)
 {
     ARMCPU *cpu = env_archcpu(env);
+    // from ocx-qemu-arm
+    if (env->uc->timer_timefunc) {
+        uint64_t freq = env->cp15.c14_cntfrq;
+        void* opaque = env->uc->timer_opaque;
+        return env->uc->timer_timefunc(opaque, freq);
+    }
 
     return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / gt_cntfrq_period_ns(cpu);
 }
 
 static void gt_recalc_timer(ARMCPU *cpu, int timeridx)
 {
-#if 0
+    // from ocx-qemu-arm
     ARMGenericTimer *gt = &cpu->env.cp15.c14_timer[timeridx];
+    CPUARMState* env = &cpu->env;
+    uint64_t freq = env->cp15.c14_cntfrq;
+    void* opaque = env->uc->timer_opaque;
+
+    static int warned = 0;
+    if (!warned && !env->uc->timer_initialized) {
+        warned = 1;
+        fprintf(stderr, "arch_timer not initialized\n");
+        return;
+    }
 
     if (gt->ctl & 1) {
         /* Timer enabled: calculate and set current ISTATUS, irq, and
@@ -2295,8 +2392,13 @@ static void gt_recalc_timer(ARMCPU *cpu, int timeridx)
 
         gt->ctl = deposit32(gt->ctl, 2, 1, istatus);
 
+        // Unicorn: commented out
         irqstate = (istatus && !(gt->ctl & 2));
-        qemu_set_irq(cpu->gt_timer_outputs[timeridx], irqstate);
+        if(irqstate) {
+            printf("irqstate/count/offset/cval : %d/0x%lx/0x%lx/0x%lx\n", irqstate, count, offset, gt->cval);
+        }
+        env->uc->timer_irqfunc(opaque, timeridx, irqstate);
+        //qemu_set_irq(cpu->gt_timer_outputs[timeridx], irqstate);
 
         if (istatus) {
             /* Next transition is when count rolls back over to zero */
@@ -2310,20 +2412,27 @@ static void gt_recalc_timer(ARMCPU *cpu, int timeridx)
          * set the timer for as far in the future as possible. When the
          * timer expires we will reset the timer for any remaining period.
          */
-        if (nexttick > INT64_MAX / gt_cntfrq_period_ns(cpu)) {
-            timer_mod_ns(cpu->gt_timer[timeridx], INT64_MAX);
-        } else {
-            timer_mod(cpu->gt_timer[timeridx], nexttick);
+        if (nexttick > INT64_MAX / GTIMER_SCALE) {
+            nexttick = INT64_MAX / GTIMER_SCALE;
         }
-        trace_arm_gt_recalc(timeridx, irqstate, nexttick);
+
+        env->uc->timer_schedule(opaque, timeridx, freq, nexttick);
+
+        // Unicorn: commented out
+        //timer_mod(cpu->gt_timer[timeridx], nexttick);
+        //trace_arm_gt_recalc(timeridx, irqstate, nexttick);
     } else {
         /* Timer disabled: ISTATUS and timer output always clear */
         gt->ctl &= ~4;
-        qemu_set_irq(cpu->gt_timer_outputs[timeridx], 0);
-        timer_del(cpu->gt_timer[timeridx]);
-        trace_arm_gt_recalc_disabled(timeridx);
+
+        env->uc->timer_irqfunc(opaque, timeridx, 0);
+        env->uc->timer_schedule(opaque, timeridx, freq, ~0);
+
+        // Unicorn: commented out
+        //qemu_set_irq(cpu->gt_timer_outputs[timeridx], 0);
+        //timer_del(cpu->gt_timer[timeridx]);
+        //trace_arm_gt_recalc_disabled(timeridx);
     }
-#endif
 }
 
 static void gt_timer_reset(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -2372,17 +2481,18 @@ static void gt_cval_write(CPUARMState *env, const ARMCPRegInfo *ri,
                           int timeridx,
                           uint64_t value)
 {
-#if 0
-    trace_arm_gt_cval_write(timeridx, value);
+    // from ocx-qemu-arm
     env->cp15.c14_timer[timeridx].cval = value;
+    printf("%s, timer[%d] cval = 0x%lx\n", __func__, timeridx, value); // Byeongwook
     gt_recalc_timer(env_archcpu(env), timeridx);
-#endif
 }
 
 static uint64_t gt_tval_read(CPUARMState *env, const ARMCPRegInfo *ri,
                              int timeridx)
 {
     uint64_t offset = 0;
+    uint64_t counter_value = 0;
+    uint32_t tval = 0;
 
     switch (timeridx) {
     case GTIMER_VIRT:
@@ -2391,8 +2501,12 @@ static uint64_t gt_tval_read(CPUARMState *env, const ARMCPRegInfo *ri,
         break;
     }
 
-    return (uint32_t)(env->cp15.c14_timer[timeridx].cval -
-                      (gt_get_countervalue(env) - offset));
+    //  return (uint32_t)(env->cp15.c14_timer[timeridx].cval -
+    //                    (gt_get_countervalue(env) - offset));
+    counter_value = gt_get_countervalue(env);
+    tval = (env->cp15.c14_timer[timeridx].cval - (counter_value - offset));
+    printf("%s, timer[%d] tval(0x%x) = cval(0x%lx) - (counter_value(0x%lx)-offset(0x%lx))\n", __func__, timeridx, tval, env->cp15.c14_timer[timeridx].cval, counter_value, offset);
+    return tval;
 }
 
 static void gt_tval_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -2400,6 +2514,7 @@ static void gt_tval_write(CPUARMState *env, const ARMCPRegInfo *ri,
                           uint64_t value)
 {
     uint64_t offset = 0;
+    uint64_t counter_value = 0;
 
     switch (timeridx) {
     case GTIMER_VIRT:
@@ -2408,8 +2523,13 @@ static void gt_tval_write(CPUARMState *env, const ARMCPRegInfo *ri,
         break;
     }
 
-    env->cp15.c14_timer[timeridx].cval = gt_get_countervalue(env) - offset +
+    // env->cp15.c14_timer[timeridx].cval = gt_get_countervalue(env) - offset +
+    //                                      sextract64(value, 0, 32);
+    // gt_recalc_timer(env_archcpu(env), timeridx);
+    counter_value = gt_get_countervalue(env);
+    env->cp15.c14_timer[timeridx].cval = counter_value - offset +
                                          sextract64(value, 0, 32);
+    printf("%s, timer[%d] cval(0x{%lx}) = counter_value(0x%lx) - offset(0x%lx) + tval(0x%lx)\n", __func__, timeridx, env->cp15.c14_timer[timeridx].cval, counter_value, offset, sextract64(value,0, 32)); // Byeongwook
     gt_recalc_timer(env_archcpu(env), timeridx);
 }
 
@@ -2417,23 +2537,39 @@ static void gt_ctl_write(CPUARMState *env, const ARMCPRegInfo *ri,
                          int timeridx,
                          uint64_t value)
 {
-#if 0
+    // from ocx-qemu-arm
     ARMCPU *cpu = env_archcpu(env);
     uint32_t oldval = env->cp15.c14_timer[timeridx].ctl;
+    // printf("%s, timer%d old_value/new_value : 0x%x/0x%lx\n", __func__, timeridx, oldval, value);
 
+    static int warned = 0;
+    if (!warned && !env->uc->timer_initialized) {
+        warned = 1;
+        fprintf(stderr, "arch_timer not initialized\n");
+        return;
+    }
+
+    // Unicorn: commented out
+    //trace_arm_gt_ctl_write(timeridx, value);
     env->cp15.c14_timer[timeridx].ctl = deposit64(oldval, 0, 2, value);
     if ((oldval ^ value) & 1) {
         /* Enable toggled */
-        gt_recalc_timer(cpu, timeridx);
+        // gt_recalc_timer(cpu, timeridx);
+        // Workaround(Byeongwook)
+        if(env->cp15.c14_timer[timeridx].cval != 0x0) {
+            gt_recalc_timer(cpu, timeridx);
+        }
     } else if ((oldval ^ value) & 2) {
         /* IMASK toggled: don't need to recalculate,
          * just set the interrupt line based on ISTATUS
          */
+        /* Unicorn: commented out */
         int irqstate = (oldval & 4) && !(value & 2);
+        env->uc->timer_irqfunc(env->uc->timer_opaque, timeridx, irqstate);
 
-        qemu_set_irq(cpu->gt_timer_outputs[timeridx], irqstate);
+        //trace_arm_gt_imask_toggle(timeridx, irqstate);
+        //qemu_set_irq(cpu->gt_timer_outputs[timeridx], irqstate);
     }
-#endif
 }
 
 static void gt_phys_timer_reset(CPUARMState *env, const ARMCPRegInfo *ri)
@@ -3950,9 +4086,9 @@ static const ARMCPRegInfo uao_reginfo = {
     .readfn = aa64_uao_read, .writefn = aa64_uao_write
 };
 
-static CPAccessResult aa64_cacheop_poc_access(CPUARMState *env,
-                                              const ARMCPRegInfo *ri,
-                                              bool isread)
+ static CPAccessResult aa64_cacheop_poc_access(CPUARMState *env,
+                                               const ARMCPRegInfo *ri,
+                                               bool isread)
 {
     /* Cache invalidate/clean to Point of Coherency or Persistence...  */
     switch (arm_current_el(env)) {
@@ -3970,6 +4106,22 @@ static CPAccessResult aa64_cacheop_poc_access(CPUARMState *env,
         break;
     }
     return CP_ACCESS_OK;
+}
+
+static void aa64_cacheop_poc_write(CPUARMState *env,
+                                   const ARMCPRegInfo *ri,
+                                   uint64_t value)
+{
+    struct uc_struct *uc = env->uc;
+    if(uc->uc_cache_func) {
+        if (ri->opc1 == 0 && ri->crm == 6 && ri->opc2 == 1) {
+            // data cache invalidate
+            uc->uc_cache_func(uc->uc_cache_opaque, 0, value);
+        } else if (ri->opc1 == 3&& ri->crm == 10 && ri->opc2 == 1) {
+            // data cache flush
+            uc->uc_cache_func(uc->uc_cache_opaque, 1, value);
+        }
+    }
 }
 
 static CPAccessResult aa64_cacheop_pou_access(CPUARMState *env,
@@ -4306,6 +4458,20 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     ARMCPU *cpu = env_archcpu(env);
 
+    if (arm_feature(env, ARM_FEATURE_PMSA) && !cpu->has_mpu) {
+        /* M bit is RAZ/WI for PMSA with no MPU implemented */
+        value &= ~SCTLR_M;
+    }
+
+    if (ri->state == ARM_CP_STATE_AA64 && !cpu_isar_feature(aa64_mte, cpu)) {
+        if (ri->opc1 == 6) { /* SCTLR_EL3 */
+            value &= ~(SCTLR_ITFSB | SCTLR_TCF | SCTLR_ATA);
+        } else {
+            value &= ~(SCTLR_ITFSB | SCTLR_TCF0 | SCTLR_TCF |
+                       SCTLR_ATA0 | SCTLR_ATA);
+        }
+    }
+
     if (raw_read(env, ri) == value) {
         /* Skip the TLB flush if nothing actually changed; Linux likes
          * to do a lot of pointless SCTLR writes.
@@ -4401,15 +4567,17 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
       .accessfn = aa64_cacheop_pou_access },
     { .name = "DC_IVAC", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 7, .crm = 6, .opc2 = 1,
-      .access = PL1_W, .accessfn = aa64_cacheop_poc_access,
-      .type = ARM_CP_NOP },
+      .access = PL1_W, .type = ARM_CP_NO_RAW,
+      .accessfn = aa64_cacheop_poc_access,
+      .writefn = aa64_cacheop_poc_write },
     { .name = "DC_ISW", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 7, .crm = 6, .opc2 = 2,
       .access = PL1_W, .accessfn = access_tsw, .type = ARM_CP_NOP },
     { .name = "DC_CVAC", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 3, .crn = 7, .crm = 10, .opc2 = 1,
-      .access = PL0_W, .type = ARM_CP_NOP,
-      .accessfn = aa64_cacheop_poc_access },
+      .access = PL0_W, .type = ARM_CP_NO_RAW,
+      .accessfn = aa64_cacheop_poc_access,
+      .writefn = aa64_cacheop_poc_write },
     { .name = "DC_CSW", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 7, .crm = 10, .opc2 = 2,
       .access = PL1_W, .accessfn = access_tsw, .type = ARM_CP_NOP },
@@ -5276,7 +5444,7 @@ static const ARMCPRegInfo el3_cp_reginfo[] = {
     { .name = "SCR_EL3", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 1, .crm = 1, .opc2 = 0,
       .access = PL3_RW, .fieldoffset = offsetof(CPUARMState, cp15.scr_el3),
-      .resetvalue = 0, .writefn = scr_write },
+      .resetfn = scr_reset, .writefn = scr_write, .raw_writefn = raw_write },
     { .name = "SCR",  .type = ARM_CP_ALIAS | ARM_CP_NEWEL,
       .cp = 15, .opc1 = 0, .crn = 1, .crm = 1, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_trap_aa32s_el1,
@@ -5614,6 +5782,93 @@ static const ARMCPRegInfo debug_lpae_cp_reginfo[] = {
       .access = PL0_R, .type = ARM_CP_CONST|ARM_CP_64BIT, .resetvalue = 0 },
     { .name = "DBGDSAR", .cp = 14, .crm = 2, .opc1 = 0,
       .access = PL0_R, .type = ARM_CP_CONST|ARM_CP_64BIT, .resetvalue = 0 },
+    REGINFO_SENTINEL
+};
+
+/*
+ * Check for traps to RAS registers, which are controlled
+ * by HCR_EL2.TERR and SCR_EL3.TERR.
+ */
+static CPAccessResult access_terr(CPUARMState *env, const ARMCPRegInfo *ri,
+                                  bool isread)
+{
+    int el = arm_current_el(env);
+
+    if (el < 2 && (arm_hcr_el2_eff(env) & HCR_TERR)) {
+        return CP_ACCESS_TRAP_EL2;
+    }
+    if (el < 3 && (env->cp15.scr_el3 & SCR_TERR)) {
+        return CP_ACCESS_TRAP_EL3;
+    }
+    return CP_ACCESS_OK;
+}
+
+static uint64_t disr_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
+    int el = arm_current_el(env);
+
+    if (el < 2 && (arm_hcr_el2_eff(env) & HCR_AMO)) {
+        return env->cp15.vdisr_el2;
+    }
+    if (el < 3 && (env->cp15.scr_el3 & SCR_EA)) {
+        return 0; /* RAZ/WI */
+    }
+    return env->cp15.disr_el1;
+}
+
+static void disr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t val)
+{
+    int el = arm_current_el(env);
+
+    if (el < 2 && (arm_hcr_el2_eff(env) & HCR_AMO)) {
+        env->cp15.vdisr_el2 = val;
+        return;
+    }
+    if (el < 3 && (env->cp15.scr_el3 & SCR_EA)) {
+        return; /* RAZ/WI */
+    }
+    env->cp15.disr_el1 = val;
+}
+
+/*
+ * Minimal RAS implementation with no Error Records.
+ * Which means that all of the Error Record registers:
+ *   ERXADDR_EL1
+ *   ERXCTLR_EL1
+ *   ERXFR_EL1
+ *   ERXMISC0_EL1
+ *   ERXMISC1_EL1
+ *   ERXMISC2_EL1
+ *   ERXMISC3_EL1
+ *   ERXPFGCDN_EL1  (RASv1p1)
+ *   ERXPFGCTL_EL1  (RASv1p1)
+ *   ERXPFGF_EL1    (RASv1p1)
+ *   ERXSTATUS_EL1
+ * and
+ *   ERRSELR_EL1
+ * may generate UNDEFINED, which is the effect we get by not
+ * listing them at all.
+ *
+ * These registers have fine-grained trap bits, but UNDEF-to-EL1
+ * is higher priority than FGT-to-EL2 so we do not need to list them
+ * in order to check for an FGT.
+ */
+static const ARMCPRegInfo minimal_ras_reginfo[] = {
+    { .name = "DISR_EL1", .state = ARM_CP_STATE_BOTH,
+      .opc0 = 3, .opc1 = 0, .crn = 12, .crm = 1, .opc2 = 1,
+      .access = PL1_RW, .fieldoffset = offsetof(CPUARMState, cp15.disr_el1),
+      .readfn = disr_read, .writefn = disr_write, .raw_writefn = raw_write },
+    { .name = "ERRIDR_EL1", .state = ARM_CP_STATE_BOTH,
+      .opc0 = 3, .opc1 = 0, .crn = 5, .crm = 3, .opc2 = 0,
+      .access = PL1_R, .accessfn = access_terr,
+      // TODO(Byeongwook) .fgt = FGT_ERRIDR_EL1,
+      .type = ARM_CP_CONST, .resetvalue = 0 },
+    { .name = "VDISR_EL2", .state = ARM_CP_STATE_BOTH,
+      .opc0 = 3, .opc1 = 4, .crn = 12, .crm = 1, .opc2 = 1,
+      .access = PL2_RW, .fieldoffset = offsetof(CPUARMState, cp15.vdisr_el2) },
+    { .name = "VSESR_EL2", .state = ARM_CP_STATE_BOTH,
+      .opc0 = 3, .opc1 = 4, .crn = 5, .crm = 2, .opc2 = 3,
+      .access = PL2_RW, .fieldoffset = offsetof(CPUARMState, cp15.vsesr_el2) },
     REGINFO_SENTINEL
 };
 
@@ -7433,6 +7688,9 @@ void register_cp_regs_for_features(ARMCPU *cpu)
     }
     if (cpu_isar_feature(aa64_uao, cpu)) {
         define_one_arm_cp_reg(cpu, &uao_reginfo);
+    }
+    if (cpu_isar_feature(any_ras, cpu)) {
+        define_arm_cp_regs(cpu, minimal_ras_reginfo);
     }
 
     if (arm_feature(env, ARM_FEATURE_EL2) && cpu_isar_feature(aa64_vh, cpu)) {
@@ -9586,7 +9844,8 @@ static bool get_phys_addr_v6(CPUARMState *env, uint32_t address,
         goto do_fault;
     }
     type = (desc & 3);
-    if (type == 0 || (type == 3 && !arm_feature(env, ARM_FEATURE_PXN))) {
+    // TODO(Byeongwook) if (type == 0 || (type == 3 && !arm_feature(env, ARM_FEATURE_PXN))) {
+    if (type == 0 || type == 3) {
         /* Section translation fault, or attempt to use the encoding
          * which is Reserved on implementations without PXN.
          */
@@ -9628,9 +9887,9 @@ static bool get_phys_addr_v6(CPUARMState *env, uint32_t address,
         pxn = desc & 1;
         ns = extract32(desc, 19, 1);
     } else {
-        if (arm_feature(env, ARM_FEATURE_PXN)) {
-            pxn = (desc >> 2) & 1;
-        }
+        // TODO(Byeongwook) if (arm_feature(env, ARM_FEATURE_PXN)) {
+        // TODO(Byeongwook)     pxn = (desc >> 2) & 1;
+        // TODO(Byeongwook) }
         ns = extract32(desc, 3, 1);
         /* Lookup l2 entry.  */
         table = (desc & 0xfffffc00) | ((address >> 10) & 0x3fc);
@@ -11183,9 +11442,12 @@ hwaddr arm_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
     ARMMMUIdx mmu_idx = arm_mmu_idx(env);
 
     *attrs = (MemTxAttrs) { 0 };
-
+    // TODO(Byeongwook) support debug access
+    // bool prev = cs->uc->is_debug;
+    // cs->uc->is_debug = true;
     ret = get_phys_addr(env, addr, 0, mmu_idx, &phys_addr,
                         attrs, &prot, &page_size, &fi, NULL);
+    // cs->uc->is_debug = prev;
 
     if (ret) {
         return -1;

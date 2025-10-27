@@ -128,28 +128,110 @@ MemoryRegion *memory_cow(struct uc_struct *uc, MemoryRegion *current, hwaddr beg
     return ram;
 }
 
-static uint64_t mmio_read_wrapper(struct uc_struct *uc, void *opaque, hwaddr addr, unsigned size)
-{
-    mmio_cbs* cbs = (mmio_cbs*)opaque;
+// static uint64_t mmio_read_wrapper(struct uc_struct *uc, void *opaque, hwaddr addr, unsigned size)
+// {
+//     mmio_cbs* cbs = (mmio_cbs*)opaque;
+//
+//     // We have to care about 32bit target.
+//     addr = addr & ( (target_ulong)(-1) );
+//     if (cbs->read) {
+//         return cbs->read(uc, addr, size, cbs->user_data_read);
+//     } else {
+//         return 0;
+//     }
+// }
+//
+// static void mmio_write_wrapper(struct uc_struct *uc, void *opaque, hwaddr addr, uint64_t data, unsigned size)
+// {
+//     mmio_cbs* cbs = (mmio_cbs*)opaque;
+//
+//     // We have to care about 32bit target.
+//     addr = addr & ( (target_ulong)(-1) );
+//     if (cbs->write) {
+//         cbs->write(uc, addr, size, data, cbs->user_data_write);
+//     }
+// }
 
-    // We have to care about 32bit target.
-    addr = addr & ( (target_ulong)(-1) );
-    if (cbs->read) {
-        return cbs->read(uc, addr, size, cbs->user_data_read);
+static MemTxResult mmio_read_wrapper_with_attr(struct uc_struct* uc, void *opaque,
+                                       hwaddr addr, uint64_t *data,
+                                       unsigned int size, MemTxAttrs attrs) {
+    uc_mmio_tx_t tx;
+    tx.addr = addr;
+    tx.size = size;
+    tx.data = data;
+
+    tx.is_read = 1;
+    tx.is_io = 0;
+
+    if (!attrs.unspecified) {
+        tx.is_secure = attrs.secure;
+        tx.is_user = attrs.user;
+
+        tx.cpuid = attrs.requester_id;
     } else {
-        return 0;
+        tx.is_secure = 0;
+        tx.is_user = 0;
+        tx.cpuid = -1;
     }
+
+    // uc->is_memcb = true;
+
+    mmio_cbs* ops = (mmio_cbs*)opaque;
+    uc_cb_mmio_t func = ops->callback;
+    uc_tx_result_t res = (*func)(uc, ops->user_data, &tx);
+
+    // uc->is_memcb = false;
+
+    switch (res) {
+    case UC_TX_OK:return MEMTX_OK;
+    case UC_TX_ERROR: return MEMTX_ERROR;
+    case UC_TX_ADDRESS_ERROR: return MEMTX_DECODE_ERROR;
+    default: break;
+    }
+
+    g_assert_not_reached();
+    return MEMTX_ERROR;
 }
 
-static void mmio_write_wrapper(struct uc_struct *uc, void *opaque, hwaddr addr, uint64_t data, unsigned size)
-{
-    mmio_cbs* cbs = (mmio_cbs*)opaque;
-    
-    // We have to care about 32bit target.
-    addr = addr & ( (target_ulong)(-1) );
-    if (cbs->write) {
-        cbs->write(uc, addr, size, data, cbs->user_data_write);
+static MemTxResult mmio_write_wrapper_with_attr(struct uc_struct* uc, void *opaque,
+                                        hwaddr addr, uint64_t data,
+                                        unsigned int size, MemTxAttrs attrs) {
+    uc_mmio_tx_t tx;
+    tx.addr = addr;
+    tx.size = size;
+    tx.data = &data;
+
+    tx.is_read = 0;
+    tx.is_io = 0;
+
+    if (!attrs.unspecified) {
+        tx.is_secure = attrs.secure;
+        tx.is_user = attrs.user;
+
+        tx.cpuid = attrs.requester_id;
+    } else {
+        tx.is_secure = 0;
+        tx.is_user = 0;
+        tx.cpuid = -1;
     }
+
+    // uc->is_memcb = true;
+
+    mmio_cbs* ops = (mmio_cbs*)opaque;
+    uc_cb_mmio_t func = ops->callback;
+    uc_tx_result_t res = (*func)(uc, ops->user_data, &tx);
+
+    // uc->is_memcb = false;
+
+    switch (res) {
+    case UC_TX_OK:return MEMTX_OK;
+    case UC_TX_ERROR: return MEMTX_ERROR;
+    case UC_TX_ADDRESS_ERROR: return MEMTX_DECODE_ERROR;
+    default: break;
+    }
+
+    g_assert_not_reached();
+    return MEMTX_ERROR;
 }
 
 static void mmio_region_destructor_uc(MemoryRegion *mr)
@@ -158,24 +240,22 @@ static void mmio_region_destructor_uc(MemoryRegion *mr)
 }
 
 MemoryRegion *memory_map_io(struct uc_struct *uc, ram_addr_t begin, size_t size,
-                            uc_cb_mmio_read_t read_cb, uc_cb_mmio_write_t write_cb,
-                            void *user_data_read, void *user_data_write)
+                            void* callback, void *user_data)
 {
     MemoryRegion *mmio = g_new(MemoryRegion, 1);
     mmio_cbs* opaques = g_new(mmio_cbs, 1);
     MemoryRegionOps *ops = &opaques->ops;
-    opaques->read = read_cb;
-    opaques->write = write_cb;
-    opaques->user_data_read = user_data_read;
-    opaques->user_data_write = user_data_write;
+    opaques->callback = (uc_cb_mmio_t)callback;
+    opaques->user_data = user_data;
 
     memset(ops, 0, sizeof(*ops));
 
-    ops->read = mmio_read_wrapper;
-    ops->read_with_attrs = NULL;
-    ops->write = mmio_write_wrapper;
-    ops->write_with_attrs = NULL;
+    ops->read = NULL; // mmio_read_wrapper
+    ops->read_with_attrs = mmio_read_wrapper_with_attr;
+    ops->write = NULL; // mmio_write_wrapper
+    ops->write_with_attrs = mmio_write_wrapper_with_attr;
     ops->endianness = DEVICE_NATIVE_ENDIAN;
+    ops->impl.max_access_size = 8; // 64bits
 
     memory_region_init_io(uc, mmio, ops, opaques, size);
 
@@ -183,11 +263,10 @@ MemoryRegion *memory_map_io(struct uc_struct *uc, ram_addr_t begin, size_t size,
 
     mmio->perms = 0;
 
-    if (read_cb)
+    if(callback) {
         mmio->perms |= UC_PROT_READ;
-
-    if (write_cb)
         mmio->perms |= UC_PROT_WRITE;
+    }
 
     memory_region_add_subregion(uc->system_memory, begin, mmio);
 

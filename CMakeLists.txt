@@ -636,6 +636,7 @@ add_library(aarch64-softmmu STATIC
     qemu/target/arm/vec_helper.c
     qemu/target/arm/vfp_helper.c
     qemu/target/arm/unicorn_aarch64.c
+    qemu/target/arm/gicv3_cpuif.c
 )
 
 if(MSVC)

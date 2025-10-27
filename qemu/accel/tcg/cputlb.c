@@ -341,23 +341,45 @@ void tlb_flush_all_cpus(CPUState *src_cpu)
 
 void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, uint16_t idxmap)
 {
-    const run_on_cpu_func fn = tlb_flush_by_mmuidx_async_work;
+    // const run_on_cpu_func fn = tlb_flush_by_mmuidx_async_work;
 
-    flush_all_helper(src_cpu, fn, RUN_ON_CPU_HOST_INT(idxmap));
-    fn(src_cpu, RUN_ON_CPU_HOST_INT(idxmap));
+    // flush_all_helper(src_cpu, fn, RUN_ON_CPU_HOST_INT(idxmap));
+    // fn(src_cpu, RUN_ON_CPU_HOST_INT(idxmap));
+    uc_engine *uc = src_cpu->uc;
+    if (!uc->smp) {
+        tlb_flush_by_mmuidx_all_cpus(src_cpu, idxmap);
+    } else {
+        g_assert(uc->tlb_cluster_flush_mmuidx != NULL);
+        uc->tlb_cluster_flush_mmuidx(src_cpu, idxmap);
+    }
 }
 
 void tlb_flush_all_cpus_synced(CPUState *src_cpu)
 {
-    tlb_flush_by_mmuidx_all_cpus_synced(src_cpu, ALL_MMUIDX_BITS);
+    uc_engine *uc = src_cpu->uc;
+    if (!uc->smp) {
+        // tlb_flush_by_mmuidx_all_cpus_synced(src_cpu, ALL_MMUIDX_BITS);
+        tlb_flush_by_mmuidx_all_cpus(src_cpu, ALL_MMUIDX_BITS);
+    } else {
+        g_assert(uc->tlb_cluster_flush != NULL);
+        uc->tlb_cluster_flush(src_cpu);
+    }
 }
 
 static inline bool tlb_hit_page_anyprot(struct uc_struct *uc, CPUTLBEntry *tlb_entry,
                                         target_ulong page)
 {
+    // from ocx-qemu-arm
+#ifdef TARGET_AARCH64
+    const uint64_t mask = 0x00fffffffffffffful; // ignore top byte
+    return tlb_hit_page(uc, tlb_entry->addr_read & mask, page & mask) ||
+           tlb_hit_page(uc, tlb_addr_write(tlb_entry) & mask, page & mask) ||
+           tlb_hit_page(uc, tlb_entry->addr_code & mask, page & mask);
+#else
     return tlb_hit_page(uc, tlb_entry->addr_read, page) ||
            tlb_hit_page(uc, tlb_addr_write(tlb_entry), page) ||
            tlb_hit_page(uc, tlb_entry->addr_code, page);
+#endif
 }
 
 /**
@@ -523,39 +545,42 @@ void tlb_flush_page(CPUState *cpu, target_ulong addr)
 void tlb_flush_page_by_mmuidx_all_cpus(CPUState *src_cpu, target_ulong addr,
                                        uint16_t idxmap)
 {
-#ifdef TARGET_ARM
     struct uc_struct *uc = src_cpu->uc;
-#endif
+    if (!uc->smp) {
 
-    /* This should already be page aligned */
-    addr &= TARGET_PAGE_MASK;
+        /* This should already be page aligned */
+        addr &= TARGET_PAGE_MASK;
 
-    /*
-     * Allocate memory to hold addr+idxmap only when needed.
-     * See tlb_flush_page_by_mmuidx for details.
-     */
-    if (idxmap < TARGET_PAGE_SIZE) {
-        flush_all_helper(src_cpu, tlb_flush_page_by_mmuidx_async_1,
-                         RUN_ON_CPU_TARGET_PTR(addr | idxmap));
-    } else {
+        /*
+        * Allocate memory to hold addr+idxmap only when needed.
+        * See tlb_flush_page_by_mmuidx for details.
+        */
+        if (idxmap < TARGET_PAGE_SIZE) {
+            flush_all_helper(src_cpu, tlb_flush_page_by_mmuidx_async_1,
+                            RUN_ON_CPU_TARGET_PTR(addr | idxmap));
+        } else {
 #if 0
-        CPUState *dst_cpu;
+            CPUState *dst_cpu;
 
-        /* Allocate a separate data block for each destination cpu.  */
-        CPU_FOREACH(dst_cpu) {
-            if (dst_cpu != src_cpu) {
-                TLBFlushPageByMMUIdxData *d
-                    = g_new(TLBFlushPageByMMUIdxData, 1);
+            /* Allocate a separate data block for each destination cpu.  */
+            CPU_FOREACH(dst_cpu) {
+                if (dst_cpu != src_cpu) {
+                    TLBFlushPageByMMUIdxData *d
+                        = g_new(TLBFlushPageByMMUIdxData, 1);
 
-                d->addr = addr;
-                d->idxmap = idxmap;
-                tlb_flush_page_by_mmuidx_async_2(dst_cpu, RUN_ON_CPU_HOST_PTR(d));
+                    d->addr = addr;
+                    d->idxmap = idxmap;
+                    tlb_flush_page_by_mmuidx_async_2(dst_cpu, RUN_ON_CPU_HOST_PTR(d));
+                }
             }
-        }
 #endif
-    }
+        }
 
-    tlb_flush_page_by_mmuidx_async_0(src_cpu, addr, idxmap);
+        tlb_flush_page_by_mmuidx_async_0(src_cpu, addr, idxmap);
+    } else {
+        g_assert(uc->tlb_cluster_flush_page_mmuidx != NULL);
+        uc->tlb_cluster_flush_page_mmuidx(src_cpu, addr, idxmap);
+    }
 }
 
 void tlb_flush_page_all_cpus(CPUState *src, target_ulong addr)
@@ -607,7 +632,13 @@ void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
 
 void tlb_flush_page_all_cpus_synced(CPUState *src, target_ulong addr)
 {
-    tlb_flush_page_by_mmuidx_all_cpus_synced(src, addr, ALL_MMUIDX_BITS);
+    uc_engine *uc = src->uc;
+    if (!uc->smp) {
+        tlb_flush_page_by_mmuidx_all_cpus_synced(src, addr, ALL_MMUIDX_BITS);
+    } else {
+        g_assert(uc->tlb_cluster_flush_page != NULL);
+        uc->tlb_cluster_flush_page(src, addr);
+    }
 }
 
 /* update the TLBs so that writes to code in the virtual page 'addr'

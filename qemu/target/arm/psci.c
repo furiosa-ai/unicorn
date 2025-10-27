@@ -46,9 +46,35 @@ bool arm_is_psci_call(ARMCPU *cpu, int excp_type)
         return false;
     }
 
+    // TODO
     return false;
 }
 
 void arm_handle_psci_call(ARMCPU *cpu)
 {
+    /*
+     * This function partially implements the logic for dispatching Power State
+     * Coordination Interface (PSCI) calls (as described in ARM DEN 0022D.b),
+     * to the extent required for bringing up and taking down secondary cores,
+     * and for handling reset and poweroff requests.
+     * Additional information about the calling convention used is available in
+     * the document 'SMC Calling Convention' (ARM DEN 0028)
+     */
+    CPUARMState *env = &cpu->env;
+    uint64_t param[4];
+    // uint64_t context_id, mpidr;
+    // target_ulong entry;
+    // int32_t ret = 0;
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        /*
+         * All PSCI functions take explicit 32-bit or native int sized
+         * arguments so we can simply zero-extend all arguments regardless
+         * of which exact function we are about to call.
+         */
+        param[i] = is_a64(env) ? env->xregs[i] : env->regs[i];
+    }
+    // TODO(Byeongwook)
+    printf("TODO PSCI 0x%lx/0x%lx/0x%lx/0x%lxn", param[0], param[1], param[2], param[3]);
 }

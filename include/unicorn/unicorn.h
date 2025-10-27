@@ -500,6 +500,36 @@ typedef enum uc_query_type {
                       // result = True)
 } uc_query_type;
 
+// from ocx-qemu-arm unicorn
+typedef struct uc_mmio_tx {
+    uint64_t addr;
+    size_t   size;
+    void*    data;
+
+    bool is_read;
+    bool is_secure; // adapted from MemAttrs
+    bool is_user;
+    bool is_io;
+
+    unsigned int cpuid;
+} uc_mmio_tx_t;
+
+typedef enum uc_tx_result {
+    UC_TX_OK = 0,
+    UC_TX_ERROR = 1,
+    UC_TX_ADDRESS_ERROR = 2,
+} uc_tx_result_t;
+
+typedef uc_tx_result_t (*uc_cb_mmio_t)(uc_engine* uc, void* opaque,
+                                       uc_mmio_tx_t* tx);
+
+typedef void     (*uc_cache_func_t)(void* opaque, int type, uint64_t value);
+
+typedef uint64_t (*uc_timer_timefunc_t)(void* opaque, uint64_t clock);
+typedef void     (*uc_timer_irqfunc_t )(void* opaque, int idx, int set);
+typedef void     (*uc_timer_schedule_t)(void* opaque, int idx, uint64_t clock,
+                                        uint64_t ticks);
+
 // The implementation of uc_ctl is like what Linux ioctl does but slightly
 // different.
 //
@@ -605,6 +635,7 @@ typedef enum uc_control_type {
     // controle if context_save/restore should work with snapshots
     // Write: @args = (int)
     UC_CTL_CONTEXT_MODE,
+    UC_CTL_SMP,
 } uc_control_type;
 
 /*
@@ -688,6 +719,8 @@ See sample_ctl.c for a detailed example.
     uc_ctl(uc, UC_CTL_WRITE(UC_CTL_TCG_BUFFER_SIZE, 1), (size))
 #define uc_ctl_context_mode(uc, mode)                                          \
     uc_ctl(uc, UC_CTL_WRITE(UC_CTL_CONTEXT_MODE, 1), (mode))
+#define uc_ctl_set_smp(uc, smp, id)                                        \
+    uc_ctl(uc, UC_CTL_WRITE(UC_CTL_SMP, 2), (smp), (id))
 
 // Opaque storage for CPU context, used with uc_context_*()
 struct uc_context;
@@ -1186,9 +1219,8 @@ uc_err uc_mem_map_ptr(uc_engine *uc, uint64_t address, uint64_t size,
    for detailed error).
  */
 UNICORN_EXPORT
-uc_err uc_mmio_map(uc_engine *uc, uint64_t address, uint64_t size,
-                   uc_cb_mmio_read_t read_cb, void *user_data_read,
-                   uc_cb_mmio_write_t write_cb, void *user_data_write);
+uc_err uc_mmio_map(uc_engine *uc, uint64_t address, size_t size,
+                   uc_cb_mmio_t callback, void *user_data);
 
 /*
  Unmap a region of emulation memory.
@@ -1448,6 +1480,115 @@ size_t uc_context_size(uc_engine *uc);
 */
 UNICORN_EXPORT
 uc_err uc_context_free(uc_context *context);
+
+UNICORN_EXPORT
+uc_err uc_interrupt(uc_engine *uc, int irq, int set);
+
+UNICORN_EXPORT
+uc_err uc_va2pa(uc_engine *uc, uint64_t va, uint64_t *pa);
+
+UNICORN_EXPORT
+uc_err uc_reset(uc_engine *uc);
+
+// from ocx-qemu-arm unicorn
+UNICORN_EXPORT
+uc_err uc_setup_portio_cb(uc_engine *uc, void* opaque, uc_cb_mmio_t callback);
+
+typedef void (*uc_tlb_cluster_flush_t)(void* opaque);
+typedef void (*uc_tlb_cluster_flush_page_t)(void* opaque, uint64_t addr);
+typedef void (*uc_tlb_cluster_flush_mmuidx_t)(void* opaque, uint16_t idxmap);
+typedef void (*uc_tlb_cluster_flush_page_mmuidx_t)(void* opaque, uint64_t addr,
+                                                   uint16_t idxmap);
+
+typedef void (*uc_breakpoint_hit_t)(void *opaque, uint64_t addr);
+typedef void (*uc_watchpoint_hit_t)(void *opaque, uint64_t addr, uint64_t size,
+                                    uint64_t data, bool iswr);
+
+UNICORN_EXPORT
+uc_err uc_tlb_flush(uc_engine *uc);
+
+UNICORN_EXPORT
+uc_err uc_tlb_flush_page(uc_engine *uc, uint64_t addr);
+
+UNICORN_EXPORT
+uc_err uc_tlb_flush_mmuidx(uc_engine *uc, uint16_t idxmap);
+
+UNICORN_EXPORT
+uc_err uc_tlb_flush_page_mmuidx(uc_engine *uc, uint64_t addr, uint16_t idxmap);
+
+UNICORN_EXPORT
+uc_err uc_register_tlb_cluster(uc_engine *uc, void *opaque,
+        uc_tlb_cluster_flush_t             tlb_cluster_flush_fn,
+        uc_tlb_cluster_flush_page_t        tlb_cluster_flush_page_fn,
+        uc_tlb_cluster_flush_mmuidx_t      tlb_cluster_flush_mmuidx_fn,
+        uc_tlb_cluster_flush_page_mmuidx_t tlb_cluster_flush_page_mmuidx_fn);
+
+UNICORN_EXPORT
+uc_err uc_insert_breakpoint(uc_engine *uc, uint64_t addr);
+
+UNICORN_EXPORT
+uc_err uc_remove_breakpoint(uc_engine *uc, uint64_t addr);
+
+UNICORN_EXPORT
+uc_err uc_setup_breakpoint_cb(uc_engine *uc, void *opaque, uc_breakpoint_hit_t fn);
+
+UNICORN_EXPORT
+uc_err uc_insert_breakpoint_cb(uc_engine *uc, uint64_t addr);
+
+UNICORN_EXPORT
+uc_err uc_remove_breakpoint_cb(uc_engine *uc, uint64_t addr);
+
+typedef enum uc_wpflags {
+    UC_WP_READ = 1 << 0,
+    UC_WP_WRITE = 1 << 1,
+    UC_WP_ACCESS = UC_WP_READ | UC_WP_WRITE,
+    UC_WP_BEFORE = 1 << 2, /* stop on instruction before watchpoint */
+    UC_WP_CALL = 1 << 3,   /* invoke a callback before watchpoint */
+} uc_wpflags_t;
+
+UNICORN_EXPORT
+uc_err uc_insert_watchpoint(uc_engine *uc, uint64_t addr, size_t sz, int flags);
+
+UNICORN_EXPORT
+uc_err uc_remove_watchpoint(uc_engine *uc, uint64_t addr, size_t sz, int flags);
+
+UNICORN_EXPORT
+uc_err uc_setup_watchpoint_cb(uc_engine *uc, void *opaque, uc_watchpoint_hit_t fn);
+
+UNICORN_EXPORT
+uc_err uc_insert_watchpoint_cb(uc_engine *uc, uint64_t addr, size_t sz,
+                               int flags);
+
+UNICORN_EXPORT
+uc_err uc_remove_watchpoint_cb(uc_engine *uc, uint64_t addr, size_t sz,
+                               int flags);
+typedef enum uc_hint {
+    UC_HINT_NOP, /* unused! NOP currently generates no code! */
+    UC_HINT_YIELD,
+    UC_HINT_WFE,
+    UC_HINT_WFI,
+    UC_HINT_SEV,
+    UC_HINT_SEVL,
+    UC_HINT_HINT, /* unused! reserved for architectural extensions */
+} uc_hint_t;
+
+typedef void (*uc_hintfunc_t)(void *, uc_hint_t);
+
+UNICORN_EXPORT
+uc_err uc_setup_hint(uc_engine *uc, void *opaque, uc_hintfunc_t hintfn);
+
+UNICORN_EXPORT
+uc_err uc_setup_cache(uc_engine *uc, void *opaque, uc_cache_func_t cachefn);
+
+UNICORN_EXPORT
+uc_err uc_setup_timer(uc_engine *uc, void *opaque, uc_timer_timefunc_t timefn,
+                      uc_timer_irqfunc_t irqfn, uc_timer_schedule_t schedfn);
+
+UNICORN_EXPORT
+uc_err uc_update_timer(uc_engine *uc, int timeridx);
+
+UNICORN_EXPORT
+unsigned int uc_get_emu_counter(uc_engine *uc);
 
 #ifdef __cplusplus
 }

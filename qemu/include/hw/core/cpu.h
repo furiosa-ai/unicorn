@@ -133,6 +133,7 @@ typedef struct CPUClass {
 
     vaddr (*adjust_watchpoint_address)(CPUState *cpu, vaddr addr, int len);
     void (*tcg_initialize)(struct uc_struct *uc);
+    void (*set_irq)(CPUState *cpu, int irq, int level);
 } CPUClass;
 
 /*
@@ -542,6 +543,7 @@ void qemu_init_vcpu(CPUState *cpu);
 #define BP_MEM_ACCESS         (BP_MEM_READ | BP_MEM_WRITE)
 #define BP_STOP_BEFORE_ACCESS 0x04
 /* 0x08 currently unused */
+#define BP_CALL               0x08
 #define BP_GDB                0x10
 #define BP_CPU                0x20
 #define BP_ANY                (BP_GDB | BP_CPU)

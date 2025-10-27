@@ -338,14 +338,22 @@ void HELPER(wfi)(CPUARMState *env, uint32_t insn_len)
 
 void HELPER(wfe)(CPUARMState *env)
 {
-    /* This is a hint instruction that is semantically different
-     * from YIELD even though we currently implement it identically.
-     * Don't actually halt the CPU, just yield back to top
-     * level loop. This is not going into a "low power state"
-     * (ie halting until some event occurs), so we never take
-     * a configurable trap to a different exception level.
-     */
-    HELPER(yield)(env);
+    uc_hintfunc_t fn = env->uc->uc_hint_func;
+    void* opaque = env->uc->uc_hint_opaque;
+
+    if (fn != NULL) {
+        if (env->uc->event_register) {
+            // skip wfe
+            env->uc->event_register = false;
+        } else {
+            fn(opaque, UC_HINT_WFE);
+        }
+        return;
+    }
+
+    CPUState *cs = env_cpu(env);
+    cs->exception_index = EXCP_YIELD;
+    cs->halted = 1;
 }
 
 void HELPER(yield)(CPUARMState *env)
@@ -358,6 +366,26 @@ void HELPER(yield)(CPUARMState *env)
      */
     cs->exception_index = EXCP_YIELD;
     cpu_loop_exit(cs);
+}
+
+void HELPER(sev)(CPUARMState *env)
+{
+    uc_hintfunc_t fn = env->uc->uc_hint_func;
+    void* opaque = env->uc->uc_hint_opaque;
+
+    env->uc->event_register = true;
+    if (fn != NULL)
+        fn(opaque, UC_HINT_SEV);
+}
+
+void HELPER(sevl)(CPUARMState *env)
+{
+    uc_hintfunc_t fn = env->uc->uc_hint_func;
+    void* opaque = env->uc->uc_hint_opaque;
+
+    env->uc->event_register = true;
+    if (fn != NULL)
+        fn(opaque, UC_HINT_SEVL);
 }
 
 /* Raise an internal-to-QEMU exception. This is limited to only

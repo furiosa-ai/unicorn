@@ -34,6 +34,7 @@
 #include "tcg-target.h"
 #include "tcg-apple-jit.h"
 #include "qemu/int128.h"
+#include "exec/exec-all.h"
 
 /* XXX: make safe guess about sizes */
 #define MAX_OP_PER_INSTR 266
