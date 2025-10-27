@@ -282,6 +282,14 @@ static inline int check_wfx_trap(CPUARMState *env, bool is_wfe)
 
 void HELPER(wfi)(CPUARMState *env, uint32_t insn_len)
 {
+    uc_hintfunc_t fn = env->uc->uc_hint_func;
+    void* opaque = env->uc->uc_hint_opaque;
+
+    if (fn != NULL) {
+        fn(opaque, UC_HINT_WFI);
+        return;
+    }
+
     CPUState *cs = env_cpu(env);
     int target_el = check_wfx_trap(env, false);
     uc_engine *uc = env->uc;
