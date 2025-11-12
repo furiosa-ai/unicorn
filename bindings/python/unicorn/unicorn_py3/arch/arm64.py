@@ -17,7 +17,7 @@ from .types import uc_engine, UcTupledReg, UcReg128
 ARM64CPReg = Tuple[int, int, int, int, int, int]
 
 HOOK_INSN_SYS_CFUNC = ctypes.CFUNCTYPE(ctypes.c_uint32, uc_engine, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p)
-
+HOOK_INSN_WFI_CFUNC = ctypes.CFUNCTYPE(ctypes.c_uint32, uc_engine, ctypes.c_void_p)
 
 class UcRegCP64(UcTupledReg[ARM64CPReg]):
     """ARM64 coprocessors registers for instructions MRS, MSR
@@ -35,6 +35,15 @@ class UcRegCP64(UcTupledReg[ARM64CPReg]):
     @property
     def value(self) -> int:
         return self.val
+
+
+class CpReg(NamedTuple):
+    crn: int
+    crm: int
+    op0: int
+    op1: int
+    op2: int
+    val: int
 
 
 class UcAArch64(Uc):
@@ -57,25 +66,25 @@ class UcAArch64(Uc):
             def __hook_insn_sys_cb(uc: Uc, reg: int, pcp_reg: Any, key: int) -> int:
                 cp_reg = ctypes.cast(pcp_reg, ctypes.POINTER(UcRegCP64)).contents
 
-                class CpReg(NamedTuple):
-                    crn: int
-                    crm: int
-                    op0: int
-                    op1: int
-                    op2: int
-                    val: int
-
                 cp_reg = CpReg(cp_reg.crn, cp_reg.crm, cp_reg.op0, cp_reg.op1, cp_reg.op2, cp_reg.val)
 
                 return callback(uc, reg, cp_reg, user_data)
 
             return __hook_insn_sys_cb
+        
+        def __hook_insn_wfi():
+            @uccallback(self, HOOK_INSN_WFI_CFUNC)
+            def __hook_insn_wfi_cb(uc: Uc, key: int):
+                return callback(uc, user_data)
+
+            return __hook_insn_wfi_cb
 
         handlers = {
             const.UC_ARM64_INS_MRS  : __hook_insn_sys,
             const.UC_ARM64_INS_MSR  : __hook_insn_sys,
             const.UC_ARM64_INS_SYS  : __hook_insn_sys,
-            const.UC_ARM64_INS_SYSL : __hook_insn_sys
+            const.UC_ARM64_INS_SYSL : __hook_insn_sys,
+            const.UC_ARM64_INS_WFI  : __hook_insn_wfi,
         }
 
         handler = handlers.get(insn.value)

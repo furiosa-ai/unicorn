@@ -4,6 +4,7 @@
 #ifndef UNICORN_ARCH_POSTFIX
 #define UNICORN_ARCH_POSTFIX _sparc
 #endif
+#define gen_helper_check_exit_request gen_helper_check_exit_request_sparc
 #define unicorn_fill_tlb unicorn_fill_tlb_sparc
 #define reg_read reg_read_sparc
 #define reg_write reg_write_sparc
@@ -796,6 +797,7 @@
 #define get_page_addr_code get_page_addr_code_sparc
 #define probe_access probe_access_sparc
 #define tlb_vaddr_to_host tlb_vaddr_to_host_sparc
+#define tlb_vaddr_to_paddr tlb_vaddr_to_paddr_sparc
 #define helper_ret_ldub_mmu helper_ret_ldub_mmu_sparc
 #define helper_le_lduw_mmu helper_le_lduw_mmu_sparc
 #define helper_be_lduw_mmu helper_be_lduw_mmu_sparc
@@ -1290,6 +1292,8 @@
 #define gen_helper_cpsr_read gen_helper_cpsr_read_sparc
 #define gen_helper_cpsr_write gen_helper_cpsr_write_sparc
 #define tlb_reset_dirty_by_vaddr tlb_reset_dirty_by_vaddr_sparc
+#define helper_stqcx_le_parallel helper_stqcx_le_parallel_sparc
+#define helper_stqcx_be_parallel helper_stqcx_be_parallel_sparc
 #define helper_compute_psr helper_compute_psr_sparc
 #define helper_compute_C_icc helper_compute_C_icc_sparc
 #define cpu_sparc_set_id cpu_sparc_set_id_sparc

@@ -2353,7 +2353,7 @@ static CPAccessResult gt_stimer_access(CPUARMState *env,
 static uint64_t gt_get_countervalue(CPUARMState *env)
 {
     ARMCPU *cpu = env_archcpu(env);
-    // from ocx-qemu-arm 
+    // from ocx-qemu-arm
     if (env->uc->timer_timefunc) {
         uint64_t freq = env->cp15.c14_cntfrq;
         void* opaque = env->uc->timer_opaque;
@@ -2365,7 +2365,7 @@ static uint64_t gt_get_countervalue(CPUARMState *env)
 
 static void gt_recalc_timer(ARMCPU *cpu, int timeridx)
 {
-    // from ocx-qemu-arm 
+    // from ocx-qemu-arm
     ARMGenericTimer *gt = &cpu->env.cp15.c14_timer[timeridx];
     CPUARMState* env = &cpu->env;
     uint64_t freq = env->cp15.c14_cntfrq;
@@ -4110,7 +4110,7 @@ static const ARMCPRegInfo uao_reginfo = {
 
 static void aa64_cacheop_poc_write(CPUARMState *env,
                                    const ARMCPRegInfo *ri,
-                                   uint64_t value) 
+                                   uint64_t value)
 {
     struct uc_struct *uc = env->uc;
     if(uc->uc_cache_func) {

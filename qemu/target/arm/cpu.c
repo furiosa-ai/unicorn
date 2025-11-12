@@ -2136,7 +2136,7 @@ void arm_cpu_class_init(struct uc_struct *uc, CPUClass *oc)
     cc->tlb_fill_cpu = arm_cpu_tlb_fill;
     cc->debug_excp_handler = arm_debug_excp_handler;
     cc->do_unaligned_access = arm_cpu_do_unaligned_access;
-    cc->set_irq = arm_cpu_set_irq; 
+    cc->set_irq = arm_cpu_set_irq;
 }
 
 static void arm_cpu_instance_init(CPUState *obj)

@@ -4,6 +4,7 @@
 #ifndef UNICORN_ARCH_POSTFIX
 #define UNICORN_ARCH_POSTFIX _arm
 #endif
+#define gen_helper_check_exit_request gen_helper_check_exit_request_arm
 #define unicorn_fill_tlb unicorn_fill_tlb_arm
 #define reg_read reg_read_arm
 #define reg_write reg_write_arm
@@ -796,6 +797,7 @@
 #define get_page_addr_code get_page_addr_code_arm
 #define probe_access probe_access_arm
 #define tlb_vaddr_to_host tlb_vaddr_to_host_arm
+#define tlb_vaddr_to_paddr tlb_vaddr_to_paddr_arm
 #define helper_ret_ldub_mmu helper_ret_ldub_mmu_arm
 #define helper_le_lduw_mmu helper_le_lduw_mmu_arm
 #define helper_be_lduw_mmu helper_be_lduw_mmu_arm
@@ -1290,6 +1292,8 @@
 #define gen_helper_cpsr_read gen_helper_cpsr_read_arm
 #define gen_helper_cpsr_write gen_helper_cpsr_write_arm
 #define tlb_reset_dirty_by_vaddr tlb_reset_dirty_by_vaddr_arm
+#define helper_stqcx_le_parallel helper_stqcx_le_parallel_arm
+#define helper_stqcx_be_parallel helper_stqcx_be_parallel_arm
 #define arm_cpu_exec_interrupt arm_cpu_exec_interrupt_arm
 #define arm_cpu_update_virq arm_cpu_update_virq_arm
 #define arm_cpu_update_vfiq arm_cpu_update_vfiq_arm

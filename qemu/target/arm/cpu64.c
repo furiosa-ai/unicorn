@@ -209,7 +209,7 @@ static void aarch64_a55_initfn(struct uc_struct *uc, CPUState *obj)
         // core count and update cpu_index
         obj->cpu_index = uc->core_id;
         cpu->mp_is_up = true;
-        // MT, [24] 
+        // MT, [24]
         // Affinity0 represents threads. Cortex-A55 is not multithreaded, but may be in a system with other cores that are multithreaded.
         cpu->mp_affinity = (1ull<<31) | (1ull<<24) | (uc->core_id<<8);
     }

@@ -1,7 +1,7 @@
 # CMake setup for Unicorn 2.
 # By Huitao Chen & Nguyen Anh Quynh, 2019-2020
 
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.5...3.20)
 
 # Only required for MSVC, but we can't know the compiler at this point because we haven't
 # called enable_language() or project(), and if we did that it would lock in the old
@@ -71,7 +71,7 @@ set(CMAKE_C_STANDARD 11)
 
 set(UNICORN_VERSION_MAJOR 2)
 set(UNICORN_VERSION_MINOR 1)
-set(UNICORN_VERSION_PATCH 1)
+set(UNICORN_VERSION_PATCH 4)
 
 include(cmake/bundle_static.cmake)
 
@@ -169,17 +169,18 @@ else()
         execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpmachine
             OUTPUT_VARIABLE UC_COMPILER_VERSION)
 
-        string(FIND "${UC_COMPILER_VERSION}" "i686" UC_RET)
-        if(${UC_RET} GREATER_EQUAL "0")
+        if(UC_COMPILER_VERSION MATCHES "^i686.*")
             set(UNICORN_TARGET_ARCH "i386")
             set(UNICORN_CFLAGS -m32 -static-libgcc) # Workaround for github action bugs
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
             set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m32")
-        else()
+        elseif(UC_COMPILER_VERSION MATCHES "^x86_64.*")
             set(UNICORN_TARGET_ARCH "i386")
             set(UNICORN_CFLAGS -m64 -mcx16)
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m64")
             set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m64")
+        elseif(UC_COMPILER_VERSION MATCHES "^aarch64.*")
+            set(UNICORN_TARGET_ARCH "aarch64")
         endif()
     elseif(ANDROID_ABI)
         string(FIND "${ANDROID_ABI}" "arm64" UC_RET)
@@ -273,6 +274,11 @@ else()
                 set(UNICORN_TARGET_ARCH "tricore")
                 break()
             endif()
+            string(FIND ${UC_COMPILER_MACRO} "loongarch64" UC_RET)
+            if (${UC_RET} GREATER_EQUAL "0")
+                set(UNICORN_TARGET_ARCH "loongarch64")
+                break()
+            endif()
             message(FATAL_ERROR "Unknown host compiler: ${CMAKE_C_COMPILER}.")
         endwhile(TRUE)
     endif()
@@ -362,44 +368,22 @@ else()
     set(TARGET_LIST "${TARGET_LIST} ")
 
     # GEN config-host.mak & target directories
-    if(NOT EXISTS "${CMAKE_BINARY_DIR}/config-host.mak")
-        execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
-            --cc=${CMAKE_C_COMPILER}
-            ${EXTRA_CFLAGS}
-            ${TARGET_LIST}
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        )
-    else()
-        file(TIMESTAMP ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure CONFIGURE_TIMESTAMP %s)
-        file(TIMESTAMP ${CMAKE_BINARY_DIR}/config-host.mak CONFIG_MAK_TIMESTAMP %s)
-        # Only run configure when configure has changed after config-host.mak generation
-        if(CONFIG_MAK_TIMESTAMP LESS CONFIGURE_TIMESTAMP)
-            message("Overwriting ${CMAKE_BINARY_DIR}/config-host.mak")
-            execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
-                --cc=${CMAKE_C_COMPILER}
-                ${EXTRA_CFLAGS}
-                ${TARGET_LIST}
-                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            )
-        endif()
-    endif()
-    # Do not regenerate config if unchanged
-    if(NOT EXISTS "${CMAKE_BINARY_DIR}/config-host.h")
-        execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
-            INPUT_FILE ${CMAKE_BINARY_DIR}/config-host.mak
-            OUTPUT_FILE ${CMAKE_BINARY_DIR}/config-host.h
-        )
-    else()
-        file(READ ${CMAKE_BINARY_DIR}/config-host.h PREVIOUS_CONFIG)
-        execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
-            INPUT_FILE ${CMAKE_BINARY_DIR}/config-host.mak
-            OUTPUT_VARIABLE CURRENT_CONFIG
-        )
-        if(NOT PREVIOUS_CONFIG STREQUAL CURRENT_CONFIG)
-            message("Overwriting ${CMAKE_BINARY_DIR}/config-host.h")
-            file(WRITE ${CMAKE_BINARY_DIR}/config-host.h ${CURRENT_CONFIG})
-        endif()
-    endif()
+    # MESSAGE(STATUS "sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
+    #     --cc=${CMAKE_C_COMPILER}
+    #     ${EXTRA_CFLAGS}
+    #     ${TARGET_LIST}
+    #     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}"
+    # )
+    execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/configure
+        --cc=${CMAKE_C_COMPILER}
+        ${EXTRA_CFLAGS}
+        ${TARGET_LIST}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
+        INPUT_FILE ${CMAKE_BINARY_DIR}/config-host.mak
+        OUTPUT_FILE ${CMAKE_BINARY_DIR}/config-host.h
+    )
     if(UNICORN_HAS_X86)
         execute_process(COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/qemu/scripts/create_config
             INPUT_FILE ${CMAKE_BINARY_DIR}/x86_64-softmmu/config-target.mak
@@ -1549,7 +1533,7 @@ if(UNICORN_BUILD_TESTS)
 endif()
 
 
-if(UNICORN_INSTALL AND NOT MSVC)
+if(UNICORN_INSTALL)
     include("GNUInstallDirs")
     file(GLOB UNICORN_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include/unicorn/*.h)
     if (BUILD_SHARED_LIBS)

@@ -46,7 +46,7 @@ bool arm_is_psci_call(ARMCPU *cpu, int excp_type)
         return false;
     }
 
-    // TODO 
+    // TODO
     return false;
 }
 
@@ -62,9 +62,9 @@ void arm_handle_psci_call(ARMCPU *cpu)
      */
     CPUARMState *env = &cpu->env;
     uint64_t param[4];
-    uint64_t context_id, mpidr;
-    target_ulong entry;
-    int32_t ret = 0;
+    // uint64_t context_id, mpidr;
+    // target_ulong entry;
+    // int32_t ret = 0;
     int i;
 
     for (i = 0; i < 4; i++) {
@@ -75,6 +75,6 @@ void arm_handle_psci_call(ARMCPU *cpu)
          */
         param[i] = is_a64(env) ? env->xregs[i] : env->regs[i];
     }
-    // TODO
+    // TODO(Byeongwook)
     printf("TODO PSCI 0x%lx/0x%lx/0x%lx/0x%lxn", param[0], param[1], param[2], param[3]);
 }

@@ -9,6 +9,9 @@ Optimize your program with less instrumentation, e.g. by using `UC_HOOK_BLOCK` i
 
 ## Why do I get a wrong PC after emulation stops?
 
+<details>
+  <summary>For version < 2.1.4 </summary>
+  
 Updating PC is a very large overhead (10x slower in the worst case, see FAQ above) for emulation so the PC sync guarantee is explained below in several cases:
 
 - A `UC_HOOK_CODE` hook is installed. In this case, the PC is sync-ed _everywhere_ within the effective range of the hook. However, on some architectures, the PC might by sync-ed all the time if the hook is installed in any range. Note using `count` in `uc_emu_start` implies installing a `UC_HOOK_CODE` hook.
@@ -33,10 +36,19 @@ mov x0, #1
 mov x1, #2
 ldr x0, [x1] <--- exception here and PC sync-ed here
 ```
+  
+</details>
+
+<details>
+  <summary>For version >= 2.1.4 </summary>
+
+We should always have valid PC all the time. Please report an issue for your case.
+
+</details>
 
 ## I get an “Unhandled CPU Exception”, why?
 
-Unicorn is a pure CPU emulator and usually it’s due to no handler registered for instructions like `syscall` and `SVC`. If you expect system emulation, you probably would like [qiling framework](https://github.com/qilingframework/qiling).
+Unicorn is a pure CPU emulator and usually it’s due to no handler registered for instructions like `syscall` and `SVC`. If you expect syscall and userland emulation, you probably would like [qiling framework](https://github.com/qilingframework/qiling).
 
 ## I would like to instrument a specific instruction but get a `UC_ERR_HOOK`, why?
 
@@ -169,9 +181,77 @@ os.environ['UNICORN_LOG_DETAIL_LEVEL'] = "1" # full filename with line info
 Please note that file names are statically compiled in and can reveal the paths
 of the file system used during compilation.
 
+## Does Unicorn support ARM PAC (Pointer Authentication)?
+
+Yes! However, Unicorn by default disables it and enabling it involves a few coding and document reading.
+
+TLDR:
+
+Taken from [#1789](https://github.com/unicorn-engine/unicorn/issues/1789).
+
+```C
+    uc_arm64_cp_reg reg;
+
+    // SCR_EL3
+    reg.op0 = 0b11;
+    reg.op1 = 0b110;
+    reg.crn = 0b0001;
+    reg.crm = 0b0001;
+    reg.op2 = 0b000;
+
+    err = uc_reg_read(uc, UC_ARM64_REG_CP_REG, &reg);
+    assert(err == UC_ERR_OK);
+
+    // NS && RW && API
+    reg.val |= (1 | (1<<10) | (1<<17));
+
+    err = uc_reg_write(uc, UC_ARM64_REG_CP_REG, &reg);
+    assert(err == UC_ERR_OK);
+
+    // SCTLR_EL1
+    reg.op0 = 0b11;
+    reg.op1 = 0b000;
+    reg.crn = 0b0001;
+    reg.crm = 0b0000;
+    reg.op2 = 0b000;
+
+    err = uc_reg_read(uc, UC_ARM64_REG_CP_REG, &reg);
+    assert(err == UC_ERR_OK);
+
+    // EnIA && EnIB
+    reg.val |= (1<<31) | (1<<30);
+
+    err = uc_reg_write(uc, UC_ARM64_REG_CP_REG, &reg);
+    assert(err == UC_ERR_OK);
+    
+    // HCR_EL2
+    reg.op0 = 0b11;
+    reg.op1 = 0b100;
+    reg.crn = 0b0001;
+    reg.crm = 0b0001;
+    reg.op2 = 0b000;
+
+    // HCR.API
+    reg.val |= (1ULL<<41);
+
+    err = uc_reg_write(uc, UC_ARM64_REG_CP_REG, &reg);
+    assert(err == UC_ERR_OK);
+```
+
+For further explanation, refer to related ARM documents. Here is an incomplete list:
+
+- [System register control of pointer authentication](https://developer.arm.com/documentation/ddi0487/latest/)
+- [EnIA & EnIB](https://developer.arm.com/documentation/ddi0595/2021-12/AArch64-Registers/SCTLR-EL1--System-Control-Register--EL1-?lang=en#fieldset_0-31_31-1)
+- [HCR.API](https://developer.arm.com/documentation/ddi0601/2020-12/AArch64-Registers/HCR-EL2--Hypervisor-Configuration-Register?lang=en#fieldset_0-41_41-1)
+Note you could find the definitions of these registers at the end of corresponding documents.
+
+## I debug my application but soon get an access violation inside unicorn.
+
+This is intended for Windows. See discussion in [#1841](https://github.com/unicorn-engine/unicorn/issues/1841).
+
 ## My code does not do what I would expect - is this a bug?
 
-Please create an github issue and provide as much details as possible.
+Please create a github issue and provide as many details as possible.
 
 - [ ] Simplified version of your script / source
   - Make sure that "no" external dependencies are needed.

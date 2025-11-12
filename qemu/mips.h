@@ -4,6 +4,7 @@
 #ifndef UNICORN_ARCH_POSTFIX
 #define UNICORN_ARCH_POSTFIX _mips
 #endif
+#define gen_helper_check_exit_request gen_helper_check_exit_request_mips
 #define unicorn_fill_tlb unicorn_fill_tlb_mips
 #define reg_read reg_read_mips
 #define reg_write reg_write_mips
@@ -796,6 +797,7 @@
 #define get_page_addr_code get_page_addr_code_mips
 #define probe_access probe_access_mips
 #define tlb_vaddr_to_host tlb_vaddr_to_host_mips
+#define tlb_vaddr_to_paddr tlb_vaddr_to_paddr_mips
 #define helper_ret_ldub_mmu helper_ret_ldub_mmu_mips
 #define helper_le_lduw_mmu helper_le_lduw_mmu_mips
 #define helper_be_lduw_mmu helper_be_lduw_mmu_mips
@@ -1290,6 +1292,8 @@
 #define gen_helper_cpsr_read gen_helper_cpsr_read_mips
 #define gen_helper_cpsr_write gen_helper_cpsr_write_mips
 #define tlb_reset_dirty_by_vaddr tlb_reset_dirty_by_vaddr_mips
+#define helper_stqcx_le_parallel helper_stqcx_le_parallel_mips
+#define helper_stqcx_be_parallel helper_stqcx_be_parallel_mips
 #define helper_mfc0_mvpcontrol helper_mfc0_mvpcontrol_mips
 #define helper_mfc0_mvpconf0 helper_mfc0_mvpconf0_mips
 #define helper_mfc0_mvpconf1 helper_mfc0_mvpconf1_mips

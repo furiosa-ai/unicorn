@@ -8,11 +8,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, Iterable, Iterat
 import ctypes
 import functools
 import weakref
-
+import warnings
 from unicorn import unicorn_const as uc
 from .arch.types import uc_err, uc_engine, uc_context, uc_hook_h, UcReg, VT
 
-# __version__ = f'{uc.UC_VERSION_MAJOR}.{uc.UC_VERSION_MINOR}.{uc.UC_VERSION_PATCH}'
 
 MemRegionStruct = Tuple[int, int, int]
 TBStruct = Tuple[int, int, int]
@@ -110,19 +109,17 @@ def __load_uc_lib() -> ctypes.CDLL:
 
     # Loading attempts, in order
     # - user-provided environment variable
-    # - pkg_resources can get us the path to the local libraries
+    # - importlib.resources/importlib_resources can get us the path to the local libraries
     # - we can get the path to the local libraries by parsing our filename
     # - global load
     # - python's lib directory
 
-    if sys.version_info.minor >= 12:
-        from importlib import resources
-
-        canonicals = resources.files('unicorn') / 'lib'
+    if sys.version_info >= (3, 9):
+        import importlib.resources as resources
     else:
-        import pkg_resources
+        import importlib_resources as resources
 
-        canonicals = pkg_resources.resource_filename('unicorn', 'lib')
+    canonicals = resources.files('unicorn') / 'lib'
 
     lib_locations = [
         os.getenv('LIBUNICORN_PATH'),
@@ -205,14 +202,14 @@ def __set_lib_prototypes(lib: ctypes.CDLL) -> None:
     __set_prototype('uc_free', uc_err, void_p)
     __set_prototype('uc_hook_add', uc_err, uc_engine, PTR(uc_hook_h), s32, void_p, void_p, u64, u64)
     __set_prototype('uc_hook_del', uc_err, uc_engine, uc_hook_h)
-    __set_prototype('uc_mem_map', uc_err, uc_engine, u64, size_t, u32)
-    __set_prototype('uc_mem_map_ptr', uc_err, uc_engine, u64, size_t, u32, void_p)
-    __set_prototype('uc_mem_protect', uc_err, uc_engine, u64, size_t, u32)
-    __set_prototype('uc_mem_read', uc_err, uc_engine, u64, PTR(char), size_t)
+    __set_prototype('uc_mem_map', uc_err, uc_engine, u64, u64, u32)
+    __set_prototype('uc_mem_map_ptr', uc_err, uc_engine, u64, u64, u32, void_p)
+    __set_prototype('uc_mem_protect', uc_err, uc_engine, u64, u64, u32)
+    __set_prototype('uc_mem_read', uc_err, uc_engine, u64, PTR(char), u64)
     __set_prototype('uc_mem_regions', uc_err, uc_engine, PTR(PTR(uc_mem_region)), PTR(u32))
-    __set_prototype('uc_mem_unmap', uc_err, uc_engine, u64, size_t)
-    __set_prototype('uc_mem_write', uc_err, uc_engine, u64, PTR(char), size_t)
-    __set_prototype('uc_mmio_map', uc_err, uc_engine, u64, size_t, void_p, void_p, void_p, void_p)
+    __set_prototype('uc_mem_unmap', uc_err, uc_engine, u64, u64)
+    __set_prototype('uc_mem_write', uc_err, uc_engine, u64, PTR(char), u64)
+    __set_prototype('uc_mmio_map', uc_err, uc_engine, u64, u64, void_p, void_p, void_p, void_p)
     __set_prototype('uc_open', uc_err, u32, u32, PTR(uc_engine))
     __set_prototype('uc_query', uc_err, uc_engine, u32, PTR(size_t))
     __set_prototype('uc_reg_read', uc_err, uc_engine, s32, void_p)
@@ -335,11 +332,12 @@ def debug() -> str:
         ('tricore', uc.UC_ARCH_TRICORE)
     )
 
-    all_archs = ''.join(f'-{name}' for name, atype in archs if uc_arch_supported(atype))
+    all_archs = '-'.join(f'{name}' for name, atype in archs if uc_arch_supported(atype))
     lib_maj, lib_min, _ = uc_version()
     bnd_maj, bnd_min, _ = version_bind()
+    lib_path = str(uclib)
 
-    return f'python-{all_archs}-c{lib_maj}.{lib_min}-b{bnd_maj}.{bnd_min}'
+    return f'python-{all_archs}-c{lib_maj}.{lib_min}-b{bnd_maj}.{bnd_min}-{lib_path}'
 
 
 if TYPE_CHECKING:
@@ -363,7 +361,7 @@ def uccallback(uc: Uc, functype: Type[_CFP]):
         def wrapper(handle: int, *args, **kwargs):
             try:
                 return func(uc, *args, **kwargs)
-            except Exception as e:
+            except BaseException as e:
                 # If multiple hooks raise exceptions, just use the first one
                 if uc._hook_exception is None:
                     uc._hook_exception = e
@@ -1445,6 +1443,16 @@ class Uc(RegStateManager):
         self.__ctl_w(uc.UC_CTL_TLB_TYPE,
             (ctypes.c_uint, mode)
         )
+
+    # For backward compatibility...
+    def ctl_tlb_mode(self, mode: int) -> None:
+        """Deprecated, please use ctl_set_tlb_mode instead.
+
+        Args:
+            mode: tlb mode to use (see UC_TLB_* constants)
+        """
+        warnings.warn('Deprecated method, use ctl_set_tlb_mode', DeprecationWarning)
+        self.ctl_set_tlb_mode(mode)
 
     def ctl_get_tcg_buffer_size(self) -> int:
         """Retrieve TCG buffer size.
