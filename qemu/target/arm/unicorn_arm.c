@@ -769,30 +769,6 @@ static uc_err uc_arm_context_restore(struct uc_struct *uc, uc_context *context)
     env->uc = uc;
     return UC_ERR_OK;
 }
-// from ocx-qemu-arm
-void arm_timer_recalc(CPUState *cpu, int timeridx)
-{
-    switch (timeridx) {
-    case GTIMER_PHYS:
-        arm_gt_ptimer_cb(ARM_CPU(cpu));
-        break;
-
-    case GTIMER_VIRT:
-        arm_gt_vtimer_cb(ARM_CPU(cpu));
-        break;
-
-    case GTIMER_HYP:
-        arm_gt_htimer_cb(ARM_CPU(cpu));
-        break;
-
-    case GTIMER_SEC:
-        arm_gt_stimer_cb(ARM_CPU(cpu));
-        break;
-
-    default:
-        assert(0 && "invalid timer index");
-    }
-}
 
 static bool arm_insn_hook_validate(uint32_t insn_enum)
 {

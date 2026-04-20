@@ -1323,6 +1323,7 @@
 #define helper_crypto_sm4e helper_crypto_sm4e_arm
 #define helper_crypto_sm4ekey helper_crypto_sm4ekey_arm
 #define helper_check_breakpoints helper_check_breakpoints_arm
+#define helper_call_breakpoints helper_call_breakpoints_arm
 #define arm_debug_check_watchpoint arm_debug_check_watchpoint_arm
 #define arm_debug_excp_handler arm_debug_excp_handler_arm
 #define arm_adjust_watchpoint_address arm_adjust_watchpoint_address_arm
